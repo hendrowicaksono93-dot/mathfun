@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useParams } from 'react-router-dom';
 import confetti from 'canvas-confetti';
 import { supabase } from '../lib/supabase';
+import { useAuth } from '../lib/AuthContext';
 import { 
   aljabarQuestions, 
   bilanganBulatQuestions, 
@@ -29,6 +30,7 @@ import { topics } from '../lib/topics';
 
 export default function Ulangan() {
   const { topicId } = useParams();
+  const { user } = useAuth();
   const currentTopic = topics.find(t => t.id === topicId) || topics[0];
   
   let quizQuestions = bilanganBulatQuestions;
@@ -114,8 +116,12 @@ export default function Ulangan() {
 
     try {
       setIsSaving(true);
+      const name = user?.user_metadata.full_name || user?.email || 'Siswa Anonim';
+      
       const { error } = await supabase.from('scores').insert([
         {
+          user_id: user?.id || null,
+          full_name: name,
           topic_id: topicId,
           topic_name: currentTopic.name,
           score: total,

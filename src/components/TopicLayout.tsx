@@ -1,10 +1,12 @@
 import React from 'react';
 import { NavLink, Outlet, useParams, Link } from 'react-router-dom';
-import { BookOpen, Gamepad2, PenTool, GraduationCap, ArrowLeft } from 'lucide-react';
+import { BookOpen, Gamepad2, PenTool, GraduationCap, ArrowLeft, User as UserIcon } from 'lucide-react';
 import { topics } from '../lib/topics';
+import { useAuth } from '../lib/AuthContext';
 
 export default function TopicLayout() {
   const { topicId } = useParams();
+  const { user } = useAuth();
   const currentTopic = topics.find(t => t.id === topicId) || { name: 'Topik Tidak Ditemukan' };
 
   const menuItems = [
@@ -21,7 +23,7 @@ export default function TopicLayout() {
         <div className="p-6 border-b border-indigo-800">
           <Link to="/" className="inline-flex items-center space-x-2 text-indigo-300 hover:text-indigo-100 transition-colors mb-4 text-sm font-medium">
             <ArrowLeft className="w-4 h-4" />
-            <span>Kembali ke Beranda</span>
+            <span>Beranda</span>
           </Link>
           <h1 className="text-xl font-bold tracking-tight leading-tight">{currentTopic.name}</h1>
           <p className="text-xs text-indigo-300 mt-2 uppercase tracking-widest font-semibold flex items-center gap-1">
@@ -53,15 +55,6 @@ export default function TopicLayout() {
             );
           })}
         </nav>
-        <div className="hidden md:block p-6 bg-indigo-950">
-          <div className="flex items-center justify-between text-xs mb-2">
-            <span>Progres Belajar</span>
-            <span>0%</span>
-          </div>
-          <div className="w-full bg-indigo-800 h-1.5 rounded-full overflow-hidden">
-            <div className="bg-green-400 h-full w-[0%]"></div>
-          </div>
-        </div>
       </aside>
 
       {/* Main Content Area */}
@@ -73,12 +66,20 @@ export default function TopicLayout() {
             <span className="text-slate-300">/</span>
             <span className="font-semibold text-sm line-clamp-1">{currentTopic.name}</span>
           </div>
-          <div className="flex items-center space-x-6">
+          <div className="flex items-center space-x-4">
             <div className="text-right">
-              <p className="text-[10px] text-slate-400 font-bold uppercase">Sesi Belajar</p>
-              <p className="text-sm font-mono font-bold text-indigo-600">Aktif</p>
+              <p className="text-[10px] text-slate-400 font-bold uppercase">Siswa</p>
+              <p className="text-sm font-bold text-indigo-600 line-clamp-1 max-w-[150px]">
+                {user?.user_metadata.full_name || user?.email || 'Tamu'}
+              </p>
             </div>
-            <div className="w-10 h-10 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-600 font-bold">AS</div>
+            <div className="w-10 h-10 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-600 font-bold overflow-hidden border border-indigo-200 shadow-sm">
+                {user?.user_metadata.avatar_url ? (
+                  <img src={user.user_metadata.avatar_url} alt="Profile" className="w-full h-full object-cover" />
+                ) : (
+                  <UserIcon className="w-5 h-5" />
+                )}
+            </div>
           </div>
         </header>
 
