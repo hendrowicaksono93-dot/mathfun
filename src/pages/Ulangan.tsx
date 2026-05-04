@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useParams } from 'react-router-dom';
 import confetti from 'canvas-confetti';
+import { supabase } from '../lib/supabase';
 import { 
   aljabarQuestions, 
   bilanganBulatQuestions, 
@@ -57,6 +58,7 @@ export default function Ulangan() {
 
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [submitted, setSubmitted] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   const [scoreInfo, setScoreInfo] = useState({ pg: 0, isian: 0, total: 0 });
 
   const handlePgChange = (id: string, value: string) => {
@@ -90,14 +92,45 @@ export default function Ulangan() {
       }
     });
 
-    const pgScore = (100 / 10) * pgCorrect; // 100 points max for 10 items. Assume total pg portion = 60%, isian = 40%
-    const finalScore = ((pgCorrect * 6) + (isianCorrect * 8)); // 10*6=60, 5*8=40. Total 100
+    const pgScore = (100 / 10) * pgCorrect;
+    const finalScore = ((pgCorrect * 6) + (isianCorrect * 8));
 
     setScoreInfo({ pg: pgCorrect, isian: isianCorrect, total: finalScore });
     setSubmitted(true);
     
+    // Simpan ke Supabase jika URL & Key tersedia
+    saveScoreToSupabase(finalScore, pgCorrect, isianCorrect);
+
     if (finalScore >= 75) {
       triggerConfetti();
+    }
+  };
+
+  const saveScoreToSupabase = async (total: number, pg: number, isian: number) => {
+    if (!supabase) {
+      console.warn('Skor tidak disimpan: Supabase belum dikonfigurasi.');
+      return;
+    }
+
+    try {
+      setIsSaving(true);
+      const { error } = await supabase.from('scores').insert([
+        {
+          topic_id: topicId,
+          topic_name: currentTopic.name,
+          score: total,
+          correct_pg: pg,
+          correct_isian: isian,
+          created_at: new Date().toISOString(),
+        }
+      ]);
+
+      if (error) throw error;
+      console.log('Skor berhasil disimpan ke Supabase!');
+    } catch (err) {
+      console.error('Gagal menyimpan skor:', err);
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -165,6 +198,10 @@ export default function Ulangan() {
                 <p className="text-sm font-medium text-amber-400">💪 Jangan menyerah! Pelajari lagi materinya ya.</p>
             )}
             
+            {isSaving && (
+              <p className="text-[10px] text-indigo-400 mt-2 italic animate-pulse">Menyimpan skor ke database...</p>
+            )}
+
             <button onClick={resetQuiz} className="mt-6 px-6 py-2.5 bg-indigo-600 text-white text-sm font-bold rounded-lg hover:bg-indigo-500 transition-colors shadow-sm">Ulangi Tes</button>
           </div>
         </div>
