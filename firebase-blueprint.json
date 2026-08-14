@@ -40,6 +40,16 @@
         "updatedAt": { "type": "string" }
       },
       "required": ["topicId", "questions"]
+    },
+    "Setting": {
+      "title": "Pengaturan Sistem & PIN",
+      "description": "Konfigurasi PIN soal per materi dan pengaturan aplikasi",
+      "type": "object",
+      "properties": {
+        "pins": { "type": "object" },
+        "scriptUrl": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      }
     }
   },
   "firestore": {
@@ -54,6 +64,10 @@
     "/bank_soal/{topicId}": {
       "schema": { "$ref": "#/entities/BankSoal" },
       "description": "Koleksi bank soal matematika per bab/materi"
+    },
+    "/settings/{settingId}": {
+      "schema": { "$ref": "#/entities/Setting" },
+      "description": "Koleksi pengaturan PIN dan integrasi aplikasi"
     }
   }
 }

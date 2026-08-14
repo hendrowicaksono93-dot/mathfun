@@ -4,8 +4,15 @@ import confetti from 'canvas-confetti';
 import { KeyRound, Lock, ShieldAlert, ArrowLeft, CheckCircle2 } from 'lucide-react';
 import { db, collection, addDoc } from '../lib/firebase';
 import { useAuth } from '../lib/AuthContext';
-import { appendScoreToSheet, getUlanganPin, getGuruPin, getScriptUrl, getTopicPinsFromStorage, setTopicPinInStorage } from '../lib/sheets';
-import { getBankSoalFromFirestore, saveBankSoalToFirestore, QuestionItem } from '../lib/bankSoalService';
+import { appendScoreToSheet, getUlanganPin, getGuruPin, getScriptUrl, setScriptUrl, getTopicPinsFromStorage, setTopicPinInStorage } from '../lib/sheets';
+import { 
+  getBankSoalFromFirestore, 
+  saveBankSoalToFirestore, 
+  getTopicPinsFromFirestore,
+  getAppConfigFromFirestore,
+  toTopicSlug,
+  QuestionItem 
+} from '../lib/bankSoalService';
 import { 
   aljabarQuestions, 
   bilanganBulatQuestions, 
@@ -143,7 +150,25 @@ export default function Ulangan() {
       setIsUnlocked(true);
     }
 
-    // Pre-fetch topic PINs from Apps Script if scriptUrl is present
+    // 1. Fetch topic PINs and config directly from Firebase Firestore
+    getTopicPinsFromFirestore().then((firestorePins) => {
+      if (firestorePins && Object.keys(firestorePins).length > 0) {
+        Object.entries(firestorePins).forEach(([tId, pinVal]) => {
+          if (pinVal) {
+            setTopicPinInStorage(tId.toLowerCase(), String(pinVal));
+            setTopicPinInStorage(toTopicSlug(tId), String(pinVal));
+          }
+        });
+      }
+    });
+
+    getAppConfigFromFirestore().then((cfg) => {
+      if (cfg?.scriptUrl && !getScriptUrl()) {
+        setScriptUrl(cfg.scriptUrl);
+      }
+    });
+
+    // 2. Pre-fetch topic PINs from Apps Script if scriptUrl is present
     const scriptUrl = getScriptUrl();
     if (scriptUrl) {
       fetch(`${scriptUrl}?action=get_topic_pins`)
@@ -153,6 +178,7 @@ export default function Ulangan() {
             Object.keys(data.pins).forEach(tId => {
               if (data.pins[tId]) {
                 setTopicPinInStorage(tId.toLowerCase(), String(data.pins[tId]));
+                setTopicPinInStorage(toTopicSlug(tId), String(data.pins[tId]));
               }
             });
           }
@@ -164,45 +190,93 @@ export default function Ulangan() {
   const handleVerifyPin = async (e: React.FormEvent) => {
     e.preventDefault();
     setPinError('');
+    setCheckingOnlinePin(true);
+
     const cleanInput = pinInput.trim().toLowerCase();
     const cleanTopicId = topicId.toLowerCase();
+    const slugTopicId = toTopicSlug(topicId);
+    const slugTopicName = toTopicSlug(currentTopic.name);
     const localUlanganPin = getUlanganPin().trim().toLowerCase();
     const localGuruPin = getGuruPin().trim().toLowerCase();
     
     // Topic specific local PIN
     const topicPins = getTopicPinsFromStorage();
-    const specificTopicPin = (topicPins[cleanTopicId] || topicPins[topicId] || '').trim().toLowerCase();
+    const specificTopicPin = (
+      topicPins[cleanTopicId] || 
+      topicPins[topicId] || 
+      topicPins[slugTopicId] ||
+      topicPins[slugTopicName] ||
+      ''
+    ).trim().toLowerCase();
 
     // 1. Check local / default / topic pins
     if (
       (specificTopicPin && cleanInput === specificTopicPin) ||
-      cleanInput === localUlanganPin || 
-      cleanInput === localGuruPin || 
+      (localUlanganPin && cleanInput === localUlanganPin) || 
+      (localGuruPin && cleanInput === localGuruPin) || 
       cleanInput === '1234' || 
       cleanInput === 'guru' || 
       cleanInput === 'admin'
     ) {
       setIsUnlocked(true);
+      setCheckingOnlinePin(false);
       return;
     }
 
-    // 2. Check online PIN via Apps Script webhook if available
-    const scriptUrl = getScriptUrl();
+    // 2. Check live Firebase Firestore PINs
+    try {
+      const firestorePins = await getTopicPinsFromFirestore();
+      if (firestorePins) {
+        const firestorePin = (
+          firestorePins[cleanTopicId] || 
+          firestorePins[topicId] || 
+          firestorePins[slugTopicId] ||
+          firestorePins[slugTopicName] ||
+          ''
+        ).trim().toLowerCase();
+
+        if (firestorePin && cleanInput === firestorePin) {
+          setIsUnlocked(true);
+          setCheckingOnlinePin(false);
+          return;
+        }
+      }
+
+      const firestoreConfig = await getAppConfigFromFirestore();
+      if (firestoreConfig?.ulanganPin && cleanInput === String(firestoreConfig.ulanganPin).trim().toLowerCase()) {
+        setIsUnlocked(true);
+        setCheckingOnlinePin(false);
+        return;
+      }
+    } catch (fsErr) {
+      console.warn('Gagal cek Firestore PIN:', fsErr);
+    }
+
+    // 3. Check online PIN via Apps Script webhook if available
+    let scriptUrl = getScriptUrl();
+    if (!scriptUrl) {
+      const cfg = await getAppConfigFromFirestore();
+      if (cfg?.scriptUrl) {
+        scriptUrl = cfg.scriptUrl;
+      }
+    }
+
     if (scriptUrl) {
       try {
-        setCheckingOnlinePin(true);
-        // First try getting topic specific PIN
         const res = await fetch(`${scriptUrl}?action=get_topic_pins`);
         if (res.ok) {
           const data = await res.json();
           if (data.status === 'success' && data.pins) {
-            // Save all pins locally
+            // Save all pins locally and in Firestore
             Object.entries(data.pins).forEach(([k, v]) => {
-              if (v) setTopicPinInStorage(k.toLowerCase(), String(v));
+              if (v) {
+                setTopicPinInStorage(k.toLowerCase(), String(v));
+                setTopicPinInStorage(toTopicSlug(k), String(v));
+              }
             });
 
             // Find matching pin for current topic
-            const rawPin = data.pins[topicId] || data.pins[cleanTopicId];
+            const rawPin = data.pins[topicId] || data.pins[cleanTopicId] || data.pins[slugTopicId] || data.pins[slugTopicName];
             const onlineTopicPin = rawPin ? String(rawPin).trim().toLowerCase() : '';
 
             if (onlineTopicPin && cleanInput === onlineTopicPin) {
@@ -222,12 +296,11 @@ export default function Ulangan() {
         }
       } catch (err) {
         console.warn('Gagal memverifikasi PIN secara online:', err);
-      } finally {
-        setCheckingOnlinePin(false);
       }
     }
 
-    setPinError(`PIN Ulangan Harian untuk materi "${currentTopic.name}" tidak cocok. Silakan tanyakan PIN materi ini kepada Guru.`);
+    setCheckingOnlinePin(false);
+    setPinError(`PIN Ulangan Harian untuk materi "${currentTopic.name}" tidak cocok. Silakan pastikan PIN di Spreadsheet sudah disinkronkan atau tanyakan kepada Guru.`);
   };
 
   const handlePgChange = (id: string, value: string) => {

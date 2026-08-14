@@ -4,7 +4,7 @@ import { ArrowRight, Search, Menu, BookOpen, LogOut, Trophy, User as UserIcon, F
 import { topics } from '../lib/topics';
 import { useAuth } from '../lib/AuthContext';
 import { db, collection, getDocs } from '../lib/firebase';
-import { syncBankSoalFromSheetToFirebase } from '../lib/bankSoalService';
+import { syncBankSoalFromSheetToFirebase, getAppConfigFromFirestore, saveAppConfigToFirestore } from '../lib/bankSoalService';
 import { 
   getSpreadsheetId, 
   setSpreadsheetId, 
@@ -58,8 +58,8 @@ export default function Home() {
 
   const handleSyncBankSoal = async () => {
     setSyncingBankSoal(true);
-    setSheetMsg('🔄 Membaca soal dari Google Sheet dan mensinkronkan ke Firebase Firestore...');
-    const result = await syncBankSoalFromSheetToFirebase();
+    setSheetMsg('🔄 Membaca soal dan PIN dari Google Sheet dan mensinkronkan ke Firebase Firestore...');
+    const result = await syncBankSoalFromSheetToFirebase(scriptUrlInput);
     if (result.success) {
       setSheetMsg(`✅ ${result.message}`);
     } else {
@@ -110,6 +110,28 @@ export default function Home() {
 
   useEffect(() => {
     fetchLeaderboard();
+
+    // Auto-load config from Firestore if available
+    getAppConfigFromFirestore().then((cfg) => {
+      if (cfg) {
+        if (cfg.spreadsheetId && !getSpreadsheetId()) {
+          setSpreadsheetId(cfg.spreadsheetId);
+          setSheetIdInput(cfg.spreadsheetId);
+        }
+        if (cfg.scriptUrl && !getScriptUrl()) {
+          setScriptUrl(cfg.scriptUrl);
+          setScriptUrlInput(cfg.scriptUrl);
+        }
+        if (cfg.guruPin && !getGuruPin()) {
+          setGuruPin(cfg.guruPin);
+          setGuruPinSettingInput(cfg.guruPin);
+        }
+        if (cfg.ulanganPin && !getUlanganPin()) {
+          setUlanganPin(cfg.ulanganPin);
+          setUlanganPinSettingInput(cfg.ulanganPin);
+        }
+      }
+    });
   }, []);
 
   const handleAuth = async (e: React.FormEvent) => {
@@ -195,6 +217,14 @@ export default function Home() {
       setUlanganPin(ulanganPinSettingInput.trim());
     }
 
+    // Save to Firebase Firestore globally
+    await saveAppConfigToFirestore({
+      spreadsheetId: sheetIdInput,
+      scriptUrl: scriptUrlInput,
+      guruPin: guruPinSettingInput.trim() || 'guru',
+      ulanganPin: ulanganPinSettingInput.trim() || '1234',
+    });
+
     // Attempt webhook update to Apps Script if scriptUrl is present
     if (scriptUrlInput) {
       try {
@@ -212,7 +242,7 @@ export default function Home() {
       }
     }
 
-    setSheetMsg('Pengaturan Google Sheet & PIN Akses berhasil disimpan!');
+    setSheetMsg('Pengaturan Google Sheet & PIN Akses berhasil disimpan ke Firebase!');
     setTimeout(() => {
       setSheetMsg('');
       setShowSheetModal(false);
