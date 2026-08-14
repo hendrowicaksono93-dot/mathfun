@@ -773,7 +773,7 @@ export default function Home() {
              <span className="font-bold text-slate-200 tracking-tight">MATH-SMP PRO</span>
            </div>
            <div className="flex flex-col md:flex-row items-center gap-4">
-             <p className="text-sm font-medium">© 2026 EduMath Indonesia. All rights reserved.</p>
+             <p className="text-sm font-medium">© 2026 Hendro Wicaksono. All rights reserved.</p>
              <button 
                onClick={handleOpenGuruOrSheets}
                className="text-xs text-slate-400 hover:text-white transition-colors underline cursor-pointer flex items-center gap-1 font-medium"
