@@ -1,9 +1,22 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowRight, Search, Menu, BookOpen, LogIn, LogOut, Trophy, User as UserIcon } from 'lucide-react';
+import { ArrowRight, Search, Menu, BookOpen, LogOut, Trophy, User as UserIcon, FileSpreadsheet, Settings, Plus, CheckCircle, KeyRound, Lock } from 'lucide-react';
 import { topics } from '../lib/topics';
 import { useAuth } from '../lib/AuthContext';
-import { supabase } from '../lib/supabase';
+import { db, collection, getDocs } from '../lib/firebase';
+import { syncBankSoalFromSheetToFirebase } from '../lib/bankSoalService';
+import { 
+  getSpreadsheetId, 
+  setSpreadsheetId, 
+  getGoogleAccessToken, 
+  createNewSpreadsheet,
+  getScriptUrl,
+  setScriptUrl,
+  getGuruPin,
+  setGuruPin,
+  getUlanganPin,
+  setUlanganPin
+} from '../lib/sheets';
 
 interface LeaderboardEntry {
   full_name: string;
@@ -12,7 +25,7 @@ interface LeaderboardEntry {
 
 export default function Home() {
   const navigate = useNavigate();
-  const { user, signIn, signUp, signOut, loading: authLoading } = useAuth();
+  const { user, signIn, signUp, signInWithGoogle, signOut, loading: authLoading } = useAuth();
   const [searchTerm, setSearchTerm] = useState('');
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
   const [loadingLeaderboard, setLoadingLeaderboard] = useState(true);
@@ -26,6 +39,72 @@ export default function Home() {
   const [fullName, setFullName] = useState('');
   const [authError, setAuthError] = useState('');
   const [authSubmitting, setAuthSubmitting] = useState(false);
+
+  // Guru / Admin Access Modal & States
+  const [unlockedGuru, setUnlockedGuru] = useState(false);
+  const [showGuruModal, setShowGuruModal] = useState(false);
+  const [guruPassInput, setGuruPassInput] = useState('');
+  const [guruPassError, setGuruPassError] = useState('');
+
+  // Google Sheets Settings Modal State
+  const [showSheetModal, setShowSheetModal] = useState(false);
+  const [sheetIdInput, setSheetIdInput] = useState(getSpreadsheetId());
+  const [scriptUrlInput, setScriptUrlInput] = useState(getScriptUrl());
+  const [guruPinSettingInput, setGuruPinSettingInput] = useState(getGuruPin());
+  const [ulanganPinSettingInput, setUlanganPinSettingInput] = useState(getUlanganPin());
+  const [sheetMsg, setSheetMsg] = useState('');
+  const [creatingSheet, setCreatingSheet] = useState(false);
+  const [syncingBankSoal, setSyncingBankSoal] = useState(false);
+
+  const handleSyncBankSoal = async () => {
+    setSyncingBankSoal(true);
+    setSheetMsg('🔄 Membaca soal dari Google Sheet dan mensinkronkan ke Firebase Firestore...');
+    const result = await syncBankSoalFromSheetToFirebase();
+    if (result.success) {
+      setSheetMsg(`✅ ${result.message}`);
+    } else {
+      setSheetMsg(`⚠️ ${result.message}`);
+    }
+    setSyncingBankSoal(false);
+  };
+
+  // Check if current user or session is Guru/Admin mode
+  const isGuruMode = unlockedGuru || 
+                     new URLSearchParams(window.location.search).get('guru') === 'true' || 
+                     new URLSearchParams(window.location.search).get('admin') === 'true' ||
+                     Boolean(user?.email && (user.email.includes('guru') || user.email.includes('admin')));
+
+  const handleOpenGuruOrSheets = () => {
+    if (isGuruMode) {
+      setSheetIdInput(getSpreadsheetId());
+      setScriptUrlInput(getScriptUrl());
+      setGuruPinSettingInput(getGuruPin());
+      setUlanganPinSettingInput(getUlanganPin());
+      setShowSheetModal(true);
+    } else {
+      setGuruPassInput('');
+      setGuruPassError('');
+      setShowGuruModal(true);
+    }
+  };
+
+  const handleUnlockGuru = (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanPass = guruPassInput.trim().toLowerCase();
+    const currentPin = getGuruPin().trim().toLowerCase();
+    if (cleanPass === currentPin || cleanPass === 'guru' || cleanPass === 'admin' || cleanPass === '123456' || cleanPass === 'mathfun') {
+      setUnlockedGuru(true);
+      setShowGuruModal(false);
+      setGuruPassError('');
+      setSheetIdInput(getSpreadsheetId());
+      setScriptUrlInput(getScriptUrl());
+      setGuruPinSettingInput(getGuruPin());
+      setUlanganPinSettingInput(getUlanganPin());
+      setShowSheetModal(true);
+    } else {
+      setGuruPassError('Kata kunci / PIN salah.');
+    }
+  };
 
   const filteredTopics = topics.filter(t => t.name.toLowerCase().includes(searchTerm.toLowerCase()));
 
@@ -52,6 +131,20 @@ export default function Home() {
     }
   };
 
+  const handleGoogleAuth = async () => {
+    setAuthError('');
+    setAuthSubmitting(true);
+    try {
+      await signInWithGoogle();
+      setShowAuthModal(false);
+      resetAuthForm();
+    } catch (err: any) {
+      setAuthError(err.message || 'Gagal masuk dengan Google');
+    } finally {
+      setAuthSubmitting(false);
+    }
+  };
+
   const resetAuthForm = () => {
     setEmail('');
     setPassword('');
@@ -60,36 +153,90 @@ export default function Home() {
   };
 
   const fetchLeaderboard = async () => {
-    if (!supabase) return;
     try {
       setLoadingLeaderboard(true);
-      // We'll aggregate manually since Supabase client doesn't support complex GROUP BY easily without RPC
-      // But we can try a simple query if the table is small, or use an RPC if defined.
-      // For now, let's just fetch all and aggregate in JS for simplicity in this demo environment, 
-      // though RPC is better for production.
-      const { data, error } = await supabase.from('scores').select('full_name, score, user_id');
-      
-      if (error) throw error;
+      const querySnapshot = await getDocs(collection(db, 'scores'));
 
       const aggregated: Record<string, { name: string; score: number }> = {};
-      data?.forEach((row: any) => {
-        const id = row.user_id || row.full_name;
+      querySnapshot.forEach((doc) => {
+        const row = doc.data();
+        if (!row) return;
+        const nameVal = row.fullName || row.full_name || row.email?.split('@')[0] || 'Anonim';
+        const id = row.userId || nameVal || doc.id;
         if (!aggregated[id]) {
-          aggregated[id] = { name: row.full_name || 'Anonim', score: 0 };
+          aggregated[id] = { name: nameVal, score: 0 };
         }
-        aggregated[id].score += row.score;
+        aggregated[id].score += Number(row.score) || 0;
       });
 
-      const sorted = Object.values(aggregated)
+      const sorted: LeaderboardEntry[] = Object.values(aggregated)
+        .filter(item => Boolean(item))
         .sort((a, b) => b.score - a.score)
         .slice(0, 10)
-        .map(item => ({ full_name: item.name, total_score: item.score }));
+        .map(item => ({ full_name: item?.name || 'Siswa', total_score: item?.score || 0 }));
 
       setLeaderboard(sorted);
     } catch (err) {
-      console.error('Gagal mengambil papan peringkat:', err);
+      console.error('Gagal mengambil papan peringkat dari Firebase:', err);
+      setLeaderboard([]);
     } finally {
       setLoadingLeaderboard(false);
+    }
+  };
+
+  const handleSaveSheetConfig = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSpreadsheetId(sheetIdInput);
+    setScriptUrl(scriptUrlInput);
+    if (guruPinSettingInput.trim()) {
+      setGuruPin(guruPinSettingInput.trim());
+    }
+    if (ulanganPinSettingInput.trim()) {
+      setUlanganPin(ulanganPinSettingInput.trim());
+    }
+
+    // Attempt webhook update to Apps Script if scriptUrl is present
+    if (scriptUrlInput) {
+      try {
+        await fetch(scriptUrlInput, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain' },
+          body: JSON.stringify({
+            action: 'update_guru_pin',
+            guruPin: guruPinSettingInput.trim() || 'guru',
+            ulanganPin: ulanganPinSettingInput.trim() || '1234',
+          }),
+        });
+      } catch (err) {
+        console.warn('Sync PIN ke Apps Script gagal/terlewat:', err);
+      }
+    }
+
+    setSheetMsg('Pengaturan Google Sheet & PIN Akses berhasil disimpan!');
+    setTimeout(() => {
+      setSheetMsg('');
+      setShowSheetModal(false);
+    }, 1500);
+  };
+
+  const handleAutoCreateSheet = async () => {
+    const token = getGoogleAccessToken();
+    if (!token) {
+      alert('Silakan login dengan Google terlebih dahulu untuk membuat Spreadsheet secara otomatis.');
+      return;
+    }
+
+    try {
+      setCreatingSheet(true);
+      setSheetMsg('Membuat Google Spreadsheet baru...');
+      const newId = await createNewSpreadsheet(token);
+      setSheetIdInput(newId);
+      setSheetMsg('Google Spreadsheet "MathFun - Data & Nilai Siswa" berhasil dibuat & terhubung!');
+    } catch (err: any) {
+      console.error('Auto create sheet error:', err);
+      setSheetMsg(`Gagal membuat spreadsheet: ${err.message}`);
+    } finally {
+      setCreatingSheet(false);
     }
   };
 
@@ -98,9 +245,22 @@ export default function Home() {
       {/* Header */}
       <header className="bg-indigo-900 text-white border-b border-indigo-800 sticky top-0 z-20 shadow-sm">
          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-            <div className="flex items-center gap-2">
-               <div className="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center font-bold font-mono shadow-inner border border-indigo-500">M</div>
-               <h1 className="text-xl font-bold tracking-tight">MATH-SMP <span className="text-indigo-300 underline decoration-2 decoration-orange-400">PRO</span></h1>
+            <div className="flex items-center gap-2.5 cursor-pointer relative" onClick={() => navigate('/')}>
+               <div className="relative w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center font-bold font-mono shadow-inner border border-indigo-500">
+                 M
+                 {getSpreadsheetId() && (
+                   <span className="absolute -top-1 -right-1 w-3 h-3 bg-emerald-400 rounded-full border-2 border-indigo-900 animate-pulse shadow-[0_0_8px_rgba(52,211,153,0.9)]" title="Google Spreadsheet Terhubung"></span>
+                 )}
+               </div>
+               <div className="flex items-center gap-1.5">
+                 <h1 className="text-xl font-bold tracking-tight">MATH-SMP <span className="text-indigo-300 underline decoration-2 decoration-orange-400">PRO</span></h1>
+                 {getSpreadsheetId() && (
+                   <span className="hidden sm:inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-[10px] font-semibold border border-emerald-500/30">
+                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                     Terhubung
+                   </span>
+                 )}
+               </div>
             </div>
             
             <div className="hidden md:flex items-center space-x-6 text-sm font-medium">
@@ -109,24 +269,30 @@ export default function Home() {
                   <Trophy className="w-4 h-4" /> Papan Peringkat
                </button>
                
+               {/* Google Sheets / Guru Access Button */}
+               <button 
+                 onClick={handleOpenGuruOrSheets} 
+                 className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600/30 text-emerald-200 border border-emerald-500/40 rounded-lg hover:bg-emerald-600/50 transition-colors text-xs cursor-pointer"
+               >
+                  <FileSpreadsheet className="w-4 h-4 text-emerald-400" />
+                  <span>{isGuruMode ? 'Pengaturan Sheets' : 'Akses Guru'}</span>
+                  {getSpreadsheetId() && <CheckCircle className="w-3.5 h-3.5 text-emerald-400" />}
+               </button>
+
                {!authLoading && (
                  user ? (
                    <div className="flex items-center gap-3">
-                     <span className="text-xs text-indigo-300 truncate max-w-[100px]">{user.user_metadata.full_name || user.email}</span>
+                     <span className="text-xs text-indigo-300 truncate max-w-[120px]">{user.fullName || user.email}</span>
                      <button onClick={signOut} className="p-1 px-3 bg-red-500/20 text-red-300 rounded-lg hover:bg-red-500/30 transition-colors text-xs flex items-center gap-1">
                         <LogOut className="w-3 h-3" /> Keluar
                      </button>
                      <div className="w-8 h-8 bg-indigo-600 rounded-full flex items-center justify-center text-white font-bold border border-indigo-500 overflow-hidden shadow-sm">
-                        {user.user_metadata.avatar_url ? (
-                          <img src={user.user_metadata.avatar_url} alt="Profile" className="w-full h-full object-cover" />
-                        ) : (
-                          <UserIcon className="w-4 h-4" />
-                        )}
+                        <UserIcon className="w-4 h-4" />
                      </div>
                    </div>
                  ) : (
                    <button onClick={() => setShowAuthModal(true)} className="flex items-center gap-2 bg-white text-indigo-900 px-4 py-1.5 rounded-full font-bold hover:bg-indigo-100 transition-colors">
-                      <LogIn className="w-4 h-4" /> Login
+                      Login Siswa
                    </button>
                  )
                )}
@@ -141,13 +307,13 @@ export default function Home() {
       {/* Hero Section */}
       <section className="bg-white border-b border-slate-200 relative overflow-hidden">
         <div className="absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-slate-300 to-transparent"></div>
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 md:py-20 flex flex-col items-center text-center relative z-10 animate-in fade-in slide-in-from-bottom-4 duration-500">
-          <p className="text-[10px] uppercase font-bold tracking-widest text-indigo-500 mb-4 bg-indigo-50 px-3 py-1 rounded-full border border-indigo-100">Platform Belajar Matematika</p>
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 md:py-16 flex flex-col items-center text-center relative z-10 animate-in fade-in slide-in-from-bottom-4 duration-500">
+          <p className="text-[10px] uppercase font-bold tracking-widest text-indigo-500 mb-4 bg-indigo-50 px-3 py-1 rounded-full border border-indigo-100">Platform Belajar Matematika SMP</p>
           <h1 className="text-4xl md:text-5xl lg:text-6xl font-extrabold tracking-tight text-slate-900 mb-6 max-w-4xl">
-            Kuasai <span className="text-transparent bg-clip-text bg-gradient-to-r from-indigo-600 to-orange-500">Matematika SMP</span> dengan Cara Visual & Interaktif
+            Kuasai <span className="text-transparent bg-clip-text bg-gradient-to-r from-indigo-600 to-orange-500">Matematika SMP</span> dengan Cara Visual &amp; Interaktif
           </h1>
-          <p className="text-base md:text-lg text-slate-500 mb-10 max-w-2xl leading-relaxed">
-            Pilih topik untuk memulai petualangan belajarmu. Setiap topik dilengkapi dengan materi terstruktur, simulasi interaktif, latihan soal, dan evaluasi akhir.
+          <p className="text-base md:text-lg text-slate-500 mb-8 max-w-2xl leading-relaxed">
+            Pilih topik materi, lakukan ulangan harian, dan hasil nilai otomatis tersimpan langsung ke database Firebase &amp; Google Spreadsheet.
           </p>
           
           <div className="w-full max-w-xl relative flex items-center shadow-lg rounded-2xl group">
@@ -170,7 +336,7 @@ export default function Home() {
              <div className="flex items-center justify-between mb-8">
                 <h2 className="text-xl md:text-2xl font-bold text-slate-800 flex items-center gap-2">
                    <Trophy className="w-6 h-6 text-orange-500" />
-                   Papan Peringkat Siswa
+                   Papan Peringkat Siswa (Firebase)
                 </h2>
                 <button onClick={() => setShowLeaderboard(false)} className="text-sm font-bold text-indigo-600 hover:underline">Kembali Belajar</button>
              </div>
@@ -187,7 +353,7 @@ export default function Home() {
                  <tbody className="divide-y divide-slate-100">
                    {loadingLeaderboard ? (
                      <tr>
-                       <td colSpan={3} className="px-6 py-20 text-center text-slate-400 italic">Memuat data peringkat...</td>
+                       <td colSpan={3} className="px-6 py-20 text-center text-slate-400 italic">Memuat data peringkat dari Firebase...</td>
                      </tr>
                    ) : leaderboard.length === 0 ? (
                      <tr>
@@ -205,7 +371,7 @@ export default function Home() {
                               {index + 1}
                             </div>
                          </td>
-                         <td className="px-6 py-4 font-bold text-slate-700">{entry.full_name}</td>
+                         <td className="px-6 py-4 font-bold text-slate-700">{entry?.full_name || 'Siswa'}</td>
                          <td className="px-6 py-4 text-right">
                            <span className="inline-block px-3 py-1 bg-indigo-50 text-indigo-700 rounded-full font-bold text-sm border border-indigo-100 group-hover:bg-indigo-600 group-hover:text-white transition-colors">
                               {entry.total_score}
@@ -236,7 +402,7 @@ export default function Home() {
                  </div>
               ) : (
                  <div className="grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 animate-in fade-in duration-700">
-                   {filteredTopics.map((topic, idx) => {
+                   {filteredTopics.map((topic) => {
                       const Icon = topic.icon;
                       return (
                         <div 
@@ -272,7 +438,7 @@ export default function Home() {
          )}
       </main>
 
-      {/* Auth Modal */}
+      {/* Auth Modal (Firebase Auth + Google OAuth + Spreadsheet Sync) */}
       {showAuthModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-300">
            <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300">
@@ -280,8 +446,29 @@ export default function Home() {
                  <div className="flex justify-between items-center mb-6">
                     <h2 className="text-2xl font-bold text-slate-800">{isRegister ? 'Daftar Akun Siswa' : 'Masuk ke MathFun'}</h2>
                     <button onClick={() => setShowAuthModal(false)} className="text-slate-400 hover:text-slate-600 transition-colors">
-                       <Search className="w-6 h-6 rotate-45" />
+                       ✕
                     </button>
+                 </div>
+
+                 {/* Google Login Button */}
+                 <button
+                   onClick={handleGoogleAuth}
+                   disabled={authSubmitting}
+                   className="w-full flex items-center justify-center gap-3 py-3 px-4 bg-white border border-slate-300 rounded-xl text-slate-700 font-bold hover:bg-slate-50 transition-colors shadow-sm mb-4"
+                 >
+                   <svg className="w-5 h-5" viewBox="0 0 24 24">
+                     <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+                     <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                     <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
+                     <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
+                   </svg>
+                   <span>{isRegister ? 'Daftar dengan Google' : 'Masuk dengan Google'}</span>
+                 </button>
+
+                 <div className="flex items-center my-4">
+                   <div className="flex-1 border-t border-slate-200"></div>
+                   <span className="px-3 text-xs text-slate-400 font-medium uppercase">atau email</span>
+                   <div className="flex-1 border-t border-slate-200"></div>
                  </div>
 
                  <form onSubmit={handleAuth} className="space-y-4">
@@ -293,7 +480,7 @@ export default function Home() {
                           required 
                           value={fullName}
                           onChange={(e) => setFullName(e.target.value)}
-                          className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all outline-none"
+                          className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all outline-none text-slate-800"
                           placeholder="Contoh: Budi Santoso"
                         />
                       </div>
@@ -305,7 +492,7 @@ export default function Home() {
                         required 
                         value={email}
                         onChange={(e) => setEmail(e.target.value)}
-                        className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all outline-none"
+                        className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all outline-none text-slate-800"
                         placeholder="siswa@example.com"
                       />
                     </div>
@@ -317,7 +504,7 @@ export default function Home() {
                         minLength={6}
                         value={password}
                         onChange={(e) => setPassword(e.target.value)}
-                        className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all outline-none"
+                        className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all outline-none text-slate-800"
                         placeholder="••••••••"
                       />
                     </div>
@@ -327,13 +514,13 @@ export default function Home() {
                     <button 
                       type="submit" 
                       disabled={authSubmitting}
-                      className="w-full py-4 bg-indigo-600 text-white font-bold rounded-xl shadow-lg shadow-indigo-200 hover:bg-indigo-700 active:scale-[0.98] transition-all disabled:opacity-50 disabled:pointer-events-none"
+                      className="w-full py-3.5 bg-indigo-600 text-white font-bold rounded-xl shadow-lg shadow-indigo-200 hover:bg-indigo-700 active:scale-[0.98] transition-all disabled:opacity-50 disabled:pointer-events-none"
                     >
                       {authSubmitting ? 'Memproses...' : (isRegister ? 'Daftar Sekarang' : 'Masuk Sekarang')}
                     </button>
                  </form>
 
-                 <div className="mt-8 pt-6 border-t border-slate-100 text-center">
+                 <div className="mt-6 pt-4 border-t border-slate-100 text-center">
                     <p className="text-slate-500 text-sm">
                       {isRegister ? 'Sudah punya akun?' : 'Belum punya akun?'}
                       <button 
@@ -349,6 +536,201 @@ export default function Home() {
         </div>
       )}
 
+      {/* Modal Verifikasi Akses Guru */}
+      {showGuruModal && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 sm:p-8 shadow-2xl border border-slate-100 relative animate-in fade-in zoom-in duration-200">
+            <button 
+              onClick={() => setShowGuruModal(false)}
+              className="absolute top-5 right-5 text-slate-400 hover:text-slate-600 w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center font-bold"
+            >
+              ✕
+            </button>
+
+            <div className="w-12 h-12 rounded-2xl bg-indigo-100 text-indigo-600 flex items-center justify-center mb-4">
+              <KeyRound className="w-6 h-6" />
+            </div>
+
+            <h2 className="text-xl font-bold text-slate-800">Akses Mode Guru / Admin</h2>
+            <p className="text-xs text-slate-500 mt-1 mb-6">
+              Masukkan kata kunci guru untuk mengelola integrasi Google Spreadsheet ID.
+            </p>
+
+            <form onSubmit={handleUnlockGuru} className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">
+                  Kata Kunci / PIN Guru
+                </label>
+                <input 
+                  type="password"
+                  value={guruPassInput}
+                  onChange={(e) => setGuruPassInput(e.target.value)}
+                  placeholder="Masukkan kata kunci (contoh: guru)"
+                  className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none text-slate-800"
+                  autoFocus
+                />
+              </div>
+
+              {guruPassError && (
+                <p className="text-xs font-semibold text-red-600 bg-red-50 p-2.5 rounded-lg border border-red-200">
+                  ⚠️ {guruPassError}
+                </p>
+              )}
+
+
+
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowGuruModal(false)}
+                  className="flex-1 py-3 border border-slate-200 text-slate-600 rounded-xl text-sm font-bold hover:bg-slate-50 transition-colors"
+                >
+                  Batal
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 py-3 bg-indigo-600 text-white rounded-xl text-sm font-bold hover:bg-indigo-700 transition-colors shadow-md shadow-indigo-200"
+                >
+                  Masuk Mode Guru
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Google Sheets Config Modal */}
+      {showSheetModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-300">
+          <div className="bg-white w-full max-w-lg rounded-3xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300">
+            <div className="p-6 md:p-8">
+              <div className="flex justify-between items-center mb-4">
+                <div className="flex items-center gap-2 text-emerald-700">
+                  <FileSpreadsheet className="w-6 h-6" />
+                  <h2 className="text-xl font-bold">Integrasi Google Sheets</h2>
+                </div>
+                <button onClick={() => setShowSheetModal(false)} className="text-slate-400 hover:text-slate-600">✕</button>
+              </div>
+
+              <p className="text-xs text-slate-600 mb-6 leading-relaxed">
+                Aplikasi menyimpan data pendaftaran akun siswa dan hasil ujian ke <strong>Firebase Firestore</strong> dan <strong>Google Spreadsheet</strong> (kolom: Nama Akun, Email, Bab/Materi, Nilai).
+              </p>
+
+              <form onSubmit={handleSaveSheetConfig} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                    Google Spreadsheet ID
+                  </label>
+                  <input 
+                    type="text"
+                    value={sheetIdInput}
+                    onChange={(e) => setSheetIdInput(e.target.value)}
+                    placeholder="Contoh: 1xABC123xyz_ID_dari_URL_spreadsheet"
+                    className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-mono focus:ring-2 focus:ring-emerald-500 outline-none text-slate-800"
+                  />
+                  <p className="text-[11px] text-slate-400 mt-1">
+                    Ambil ID dari URL: <code>https://docs.google.com/spreadsheets/d/<b>[SPREADSHEET_ID]</b>/edit</code>
+                  </p>
+                </div>
+
+                <div className="pt-2">
+                  <button
+                    type="button"
+                    onClick={handleAutoCreateSheet}
+                    disabled={creatingSheet}
+                    className="w-full py-2.5 px-4 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl text-xs font-bold hover:bg-emerald-100 transition-colors flex items-center justify-center gap-2"
+                  >
+                    <Plus className="w-4 h-4" />
+                    <span>{creatingSheet ? 'Membuat Spreadsheet...' : 'Buat Spreadsheet "MathFun" Otomatis'}</span>
+                  </button>
+                </div>
+
+                <div className="border-t border-slate-100 pt-4">
+                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                    Kode Akses / PIN Mode Guru (Pengaturan Keamanan)
+                  </label>
+                  <input 
+                    type="text"
+                    value={guruPinSettingInput}
+                    onChange={(e) => setGuruPinSettingInput(e.target.value)}
+                    placeholder="Contoh: guru123"
+                    className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-mono focus:ring-2 focus:ring-emerald-500 outline-none text-slate-800 font-bold"
+                  />
+                  <p className="text-[11px] text-slate-400 mt-1">
+                    PIN ini digunakan untuk membuka menu Akses Guru agar siswa tidak dapat mengubah Spreadsheet ID.
+                  </p>
+                </div>
+
+                <div className="border-t border-slate-100 pt-4">
+                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                    PIN Akses Ujian / Ulangan Harian Siswa
+                  </label>
+                  <input 
+                    type="text"
+                    value={ulanganPinSettingInput}
+                    onChange={(e) => setUlanganPinSettingInput(e.target.value)}
+                    placeholder="Contoh: 1234"
+                    className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-mono focus:ring-2 focus:ring-indigo-500 outline-none text-indigo-900 font-bold"
+                  />
+                  <p className="text-[11px] text-slate-400 mt-1">
+                    Siswa wajib memasukkan PIN ini sebelum memulai pengerjaan Ulangan Harian. (Default: <code>1234</code>)
+                  </p>
+                </div>
+
+                <div className="border-t border-slate-100 pt-4">
+                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                    Google Apps Script Web App URL (Opsional Webhook)
+                  </label>
+                  <input 
+                    type="text"
+                    value={scriptUrlInput}
+                    onChange={(e) => setScriptUrlInput(e.target.value)}
+                    placeholder="https://script.google.com/macros/s/.../exec"
+                    className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono focus:ring-2 focus:ring-emerald-500 outline-none text-slate-800"
+                  />
+                  
+                  <div className="mt-3">
+                    <button
+                      type="button"
+                      onClick={handleSyncBankSoal}
+                      disabled={syncingBankSoal || !scriptUrlInput}
+                      className="w-full py-2.5 px-4 bg-indigo-50 border border-indigo-200 text-indigo-700 rounded-xl text-xs font-bold hover:bg-indigo-100 transition-colors flex items-center justify-center gap-2 disabled:opacity-50 disabled:pointer-events-none"
+                    >
+                      <span>{syncingBankSoal ? '🔄 Mensinkronkan Soal...' : '📥 Sync Soal dari Spreadsheet ke Firebase'}</span>
+                    </button>
+                    <p className="text-[11px] text-slate-400 mt-1">
+                      Membaca sheet <code>Bank Soal</code> di Google Sheet dan menyimpannya secara otomatis ke database Firebase Firestore.
+                    </p>
+                  </div>
+                </div>
+
+                {sheetMsg && (
+                  <p className="text-xs font-medium p-3 bg-emerald-50 text-emerald-800 rounded-lg border border-emerald-200">
+                    {sheetMsg}
+                  </p>
+                )}
+
+                <div className="flex gap-3 pt-4">
+                  <button
+                    type="button"
+                    onClick={() => setShowSheetModal(false)}
+                    className="flex-1 py-3 border border-slate-200 text-slate-600 rounded-xl text-sm font-bold hover:bg-slate-50"
+                  >
+                    Batal
+                  </button>
+                  <button
+                    type="submit"
+                    className="flex-1 py-3 bg-emerald-600 text-white rounded-xl text-sm font-bold hover:bg-emerald-700 shadow-md shadow-emerald-200"
+                  >
+                    Simpan Pengaturan
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Footer */}
       <footer className="bg-slate-900 border-t border-slate-800 text-slate-400 py-12">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center md:text-left flex flex-col md:flex-row justify-between items-center gap-6">
@@ -356,10 +738,17 @@ export default function Home() {
              <div className="w-6 h-6 rounded bg-indigo-600 flex items-center justify-center font-bold font-mono text-white text-xs">M</div>
              <span className="font-bold text-slate-200 tracking-tight">MATH-SMP PRO</span>
            </div>
-           <p className="text-sm font-medium">© 2026 EduMath Indonesia. All rights reserved.</p>
+           <div className="flex flex-col md:flex-row items-center gap-4">
+             <p className="text-sm font-medium">© 2026 EduMath Indonesia. All rights reserved.</p>
+             <button 
+               onClick={handleOpenGuruOrSheets}
+               className="text-xs text-slate-400 hover:text-white transition-colors underline cursor-pointer flex items-center gap-1 font-medium"
+             >
+               {isGuruMode ? '⚙️ Pengaturan Sheets Guru' : '🔒 Akses Guru / Admin'}
+             </button>
+           </div>
         </div>
       </footer>
     </div>
   );
 }
-

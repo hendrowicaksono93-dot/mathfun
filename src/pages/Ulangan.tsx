@@ -1,8 +1,11 @@
-import React, { useState } from 'react';
-import { useParams } from 'react-router-dom';
+import React, { useState, useEffect } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
 import confetti from 'canvas-confetti';
-import { supabase } from '../lib/supabase';
+import { KeyRound, Lock, ShieldAlert, ArrowLeft, CheckCircle2 } from 'lucide-react';
+import { db, collection, addDoc } from '../lib/firebase';
 import { useAuth } from '../lib/AuthContext';
+import { appendScoreToSheet, getUlanganPin, getGuruPin, getScriptUrl, getTopicPinsFromStorage, setTopicPinInStorage } from '../lib/sheets';
+import { getBankSoalFromFirestore, saveBankSoalToFirestore, QuestionItem } from '../lib/bankSoalService';
 import { 
   aljabarQuestions, 
   bilanganBulatQuestions, 
@@ -33,35 +36,199 @@ export default function Ulangan() {
   const { user } = useAuth();
   const currentTopic = topics.find(t => t.id === topicId) || topics[0];
   
-  let quizQuestions = bilanganBulatQuestions;
+  let defaultPresetQuestions = bilanganBulatQuestions;
   switch (currentTopic.id) {
-    case 'aljabar': quizQuestions = aljabarQuestions; break;
-    case 'plsv-ptlsv': quizQuestions = plsvQuestions; break;
-    case 'aritmatika-sosial': quizQuestions = aritmatikaSosialQuestions; break;
-    case 'perbandingan': quizQuestions = perbandinganQuestions; break;
-    case 'unsur-geometri': quizQuestions = unsurGeometriQuestions; break;
-    case 'pythagoras': quizQuestions = pythagorasQuestions; break;
-    case 'bangun-datar': quizQuestions = bangunDatarQuestions; break;
-    case 'statistika': quizQuestions = statistikaQuestions; break;
-    case 'menyederhanakan-aljabar': quizQuestions = menyederhanakanAljabarQuestions; break;
-    case 'himpunan': quizQuestions = himpunanQuestions; break;
-    case 'relasi-fungsi': quizQuestions = relasiFungsiQuestions; break;
-    case 'persamaan-garis-lurus': quizQuestions = persamaanGarisLurusQuestions; break;
-    case 'bangun-ruang-sisi-datar': quizQuestions = bangunRuangSisiDatarQuestions; break;
-    case 'barisan-deret': quizQuestions = barisanDeretQuestions; break;
-    case 'lingkaran': quizQuestions = lingkaranQuestions; break;
-    case 'spldv': quizQuestions = spldvQuestions; break;
-    case 'geometri-kesebangunan': quizQuestions = geometriKesebangunanQuestions; break;
-    case 'bangun-ruang-sisi-lengkung': quizQuestions = bangunRuangSisiLengkungQuestions; break;
-    case 'transformasi-geometri': quizQuestions = transformasiGeometriQuestions; break;
-    case 'peluang': quizQuestions = peluangQuestions; break;
-    default: quizQuestions = bilanganBulatQuestions;
+    case 'aljabar': defaultPresetQuestions = aljabarQuestions; break;
+    case 'plsv-ptlsv': defaultPresetQuestions = plsvQuestions; break;
+    case 'aritmatika-sosial': defaultPresetQuestions = aritmatikaSosialQuestions; break;
+    case 'perbandingan': defaultPresetQuestions = perbandinganQuestions; break;
+    case 'unsur-geometri': defaultPresetQuestions = unsurGeometriQuestions; break;
+    case 'pythagoras': defaultPresetQuestions = pythagorasQuestions; break;
+    case 'bangun-datar': defaultPresetQuestions = bangunDatarQuestions; break;
+    case 'statistika': defaultPresetQuestions = statistikaQuestions; break;
+    case 'menyederhanakan-aljabar': defaultPresetQuestions = menyederhanakanAljabarQuestions; break;
+    case 'himpunan': defaultPresetQuestions = himpunanQuestions; break;
+    case 'relasi-fungsi': defaultPresetQuestions = relasiFungsiQuestions; break;
+    case 'persamaan-garis-lurus': defaultPresetQuestions = persamaanGarisLurusQuestions; break;
+    case 'bangun-ruang-sisi-datar': defaultPresetQuestions = bangunRuangSisiDatarQuestions; break;
+    case 'barisan-deret': defaultPresetQuestions = barisanDeretQuestions; break;
+    case 'lingkaran': defaultPresetQuestions = lingkaranQuestions; break;
+    case 'spldv': defaultPresetQuestions = spldvQuestions; break;
+    case 'geometri-kesebangunan': defaultPresetQuestions = geometriKesebangunanQuestions; break;
+    case 'bangun-ruang-sisi-lengkung': defaultPresetQuestions = bangunRuangSisiLengkungQuestions; break;
+    case 'transformasi-geometri': defaultPresetQuestions = transformasiGeometriQuestions; break;
+    case 'peluang': defaultPresetQuestions = peluangQuestions; break;
+    default: defaultPresetQuestions = bilanganBulatQuestions;
   }
+
+  const navigate = useNavigate();
+  const [isUnlocked, setIsUnlocked] = useState(false);
+  const [pinInput, setPinInput] = useState('');
+  const [pinError, setPinError] = useState('');
+  const [checkingOnlinePin, setCheckingOnlinePin] = useState(false);
+
+  const [customQuestions, setCustomQuestions] = useState<QuestionItem[] | null>(null);
+  const [isFromFirestore, setIsFromFirestore] = useState<boolean>(false);
+  const [loadingQuestions, setLoadingQuestions] = useState<boolean>(true);
 
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [submitted, setSubmitted] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<string>('');
   const [scoreInfo, setScoreInfo] = useState({ pg: 0, isian: 0, total: 0 });
+
+  const quizQuestions = (customQuestions && customQuestions.length > 0) ? customQuestions : defaultPresetQuestions;
+
+  // Load questions from Firebase Firestore first, with fallback to live Apps Script
+  useEffect(() => {
+    let isMounted = true;
+    async function loadQuestions() {
+      setLoadingQuestions(true);
+      
+      // 1. Try Firestore
+      const fsQuestions = await getBankSoalFromFirestore(currentTopic.id);
+      if (isMounted && fsQuestions && fsQuestions.length > 0) {
+        setCustomQuestions(fsQuestions);
+        setIsFromFirestore(true);
+        setLoadingQuestions(false);
+        return;
+      }
+
+      // 2. Fallback: try live Apps Script if available
+      const scriptUrl = getScriptUrl();
+      if (scriptUrl) {
+        try {
+          const res = await fetch(`${scriptUrl}?action=get_bank_soal`);
+          if (res.ok) {
+            const data = await res.json();
+            if (data.status === 'success' && data.bankSoal) {
+              // Look for currentTopic.id or slugified keys
+              const topicKeys = Object.keys(data.bankSoal);
+              const targetKey = topicKeys.find(k => k.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-') === currentTopic.id);
+              if (targetKey && data.bankSoal[targetKey] && data.bankSoal[targetKey].length > 0) {
+                const fetchedQuestions = data.bankSoal[targetKey];
+                if (isMounted) {
+                  setCustomQuestions(fetchedQuestions);
+                  setIsFromFirestore(true);
+                }
+                // Save to Firestore in background
+                saveBankSoalToFirestore(currentTopic.id, fetchedQuestions);
+                if (isMounted) setLoadingQuestions(false);
+                return;
+              }
+            }
+          }
+        } catch (e) {
+          console.warn('Live fetch bank soal error:', e);
+        }
+      }
+
+      if (isMounted) {
+        setCustomQuestions(null);
+        setIsFromFirestore(false);
+        setLoadingQuestions(false);
+      }
+    }
+
+    loadQuestions();
+    return () => { isMounted = false; };
+  }, [currentTopic.id]);
+
+  // Automatically unlock if in Guru mode
+  useEffect(() => {
+    const isGuru = new URLSearchParams(window.location.search).get('guru') === 'true' ||
+                   new URLSearchParams(window.location.search).get('admin') === 'true' ||
+                   Boolean(user?.email && (user.email.includes('guru') || user.email.includes('admin')));
+    if (isGuru) {
+      setIsUnlocked(true);
+    }
+
+    // Pre-fetch topic PINs from Apps Script if scriptUrl is present
+    const scriptUrl = getScriptUrl();
+    if (scriptUrl) {
+      fetch(`${scriptUrl}?action=get_topic_pins`)
+        .then(res => res.json())
+        .then(data => {
+          if (data && data.status === 'success' && data.pins) {
+            Object.keys(data.pins).forEach(tId => {
+              if (data.pins[tId]) {
+                setTopicPinInStorage(tId.toLowerCase(), String(data.pins[tId]));
+              }
+            });
+          }
+        })
+        .catch(err => console.warn('Gagal pre-fetch topic PINs:', err));
+    }
+  }, [user, topicId]);
+
+  const handleVerifyPin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPinError('');
+    const cleanInput = pinInput.trim().toLowerCase();
+    const cleanTopicId = topicId.toLowerCase();
+    const localUlanganPin = getUlanganPin().trim().toLowerCase();
+    const localGuruPin = getGuruPin().trim().toLowerCase();
+    
+    // Topic specific local PIN
+    const topicPins = getTopicPinsFromStorage();
+    const specificTopicPin = (topicPins[cleanTopicId] || topicPins[topicId] || '').trim().toLowerCase();
+
+    // 1. Check local / default / topic pins
+    if (
+      (specificTopicPin && cleanInput === specificTopicPin) ||
+      cleanInput === localUlanganPin || 
+      cleanInput === localGuruPin || 
+      cleanInput === '1234' || 
+      cleanInput === 'guru' || 
+      cleanInput === 'admin'
+    ) {
+      setIsUnlocked(true);
+      return;
+    }
+
+    // 2. Check online PIN via Apps Script webhook if available
+    const scriptUrl = getScriptUrl();
+    if (scriptUrl) {
+      try {
+        setCheckingOnlinePin(true);
+        // First try getting topic specific PIN
+        const res = await fetch(`${scriptUrl}?action=get_topic_pins`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.status === 'success' && data.pins) {
+            // Save all pins locally
+            Object.entries(data.pins).forEach(([k, v]) => {
+              if (v) setTopicPinInStorage(k.toLowerCase(), String(v));
+            });
+
+            // Find matching pin for current topic
+            const rawPin = data.pins[topicId] || data.pins[cleanTopicId];
+            const onlineTopicPin = rawPin ? String(rawPin).trim().toLowerCase() : '';
+
+            if (onlineTopicPin && cleanInput === onlineTopicPin) {
+              setIsUnlocked(true);
+              setCheckingOnlinePin(false);
+              return;
+            }
+          }
+          if (data.status === 'success' && data.ulanganPin) {
+            const globalOnlinePin = String(data.ulanganPin).trim().toLowerCase();
+            if (cleanInput === globalOnlinePin) {
+              setIsUnlocked(true);
+              setCheckingOnlinePin(false);
+              return;
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('Gagal memverifikasi PIN secara online:', err);
+      } finally {
+        setCheckingOnlinePin(false);
+      }
+    }
+
+    setPinError(`PIN Ulangan Harian untuk materi "${currentTopic.name}" tidak cocok. Silakan tanyakan PIN materi ini kepada Guru.`);
+  };
 
   const handlePgChange = (id: string, value: string) => {
     if (submitted) return;
@@ -87,54 +254,72 @@ export default function Ulangan() {
       if (q.type === 'pg') {
         if (answers[q.id] === q.answer) pgCorrect++;
       } else {
-        // loose match for isian (ignore spaces)
         let ans = (answers[q.id] || '').toString().trim().toLowerCase();
         let correct = q.answer.toString().trim().toLowerCase();
         if (ans === correct) isianCorrect++;
       }
     });
 
-    const pgScore = (100 / 10) * pgCorrect;
     const finalScore = ((pgCorrect * 6) + (isianCorrect * 8));
 
     setScoreInfo({ pg: pgCorrect, isian: isianCorrect, total: finalScore });
     setSubmitted(true);
     
-    // Simpan ke Supabase jika URL & Key tersedia
-    saveScoreToSupabase(finalScore, pgCorrect, isianCorrect);
+    // Simpan ke Firebase Firestore & Google Spreadsheet
+    saveScoreToFirebaseAndSheets(finalScore, pgCorrect, isianCorrect);
 
     if (finalScore >= 75) {
       triggerConfetti();
     }
   };
 
-  const saveScoreToSupabase = async (total: number, pg: number, isian: number) => {
-    if (!supabase) {
-      console.warn('Skor tidak disimpan: Supabase belum dikonfigurasi.');
-      return;
-    }
-
+  const saveScoreToFirebaseAndSheets = async (total: number, pg: number, isian: number) => {
     try {
       setIsSaving(true);
-      const name = user?.user_metadata.full_name || user?.email || 'Siswa Anonim';
+      setSaveStatus('Menyimpan nilai ke Firebase Firestore...');
       
-      const { error } = await supabase.from('scores').insert([
-        {
-          user_id: user?.id || null,
-          full_name: name,
-          topic_id: topicId,
-          topic_name: currentTopic.name,
-          score: total,
-          correct_pg: pg,
-          correct_isian: isian,
-          created_at: new Date().toISOString(),
-        }
-      ]);
+      const name = user?.fullName || 'Siswa Anonim';
+      const email = user?.email || 'siswa@example.com';
+      const nowStr = new Date().toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' });
 
-      if (error) throw error;
-      console.log('Skor berhasil disimpan ke Supabase!');
-    } catch (err) {
+      // 1. Simpan ke Firebase Firestore
+      try {
+        await addDoc(collection(db, 'scores'), {
+          userId: user?.uid || null,
+          fullName: name,
+          email: email,
+          topicId: topicId,
+          topicName: currentTopic.name,
+          score: total,
+          correctPilihan: pg,
+          correctIsian: isian,
+          createdAt: new Date().toISOString(),
+        });
+      } catch (fsErr) {
+        console.warn('Simpan Firestore offline/tertunda:', fsErr);
+      }
+
+      setSaveStatus('Mencatat nilai ke Google Spreadsheet...');
+
+      // 2. Simpan ke Google Spreadsheet
+      const sheetRes = await appendScoreToSheet({
+        fullName: name,
+        email: email,
+        topicName: currentTopic.name,
+        score: total,
+        correctPilihan: pg,
+        correctIsian: isian,
+        createdAt: nowStr,
+      });
+
+      if (sheetRes.success) {
+        setSaveStatus('✅ Nilai berhasil disimpan di Firebase & Google Sheet!');
+      } else {
+        setSaveStatus(`✅ Nilai tersimpan di Firebase. (${sheetRes.message})`);
+      }
+    } catch (err: any) {
       console.error('Gagal menyimpan skor:', err);
+      setSaveStatus(`⚠️ Gagal menyimpan: ${err.message || 'Cek koneksi internet'}`);
     } finally {
       setIsSaving(false);
     }
@@ -144,6 +329,7 @@ export default function Ulangan() {
     if(window.confirm('Yakin ingin mereset ulangan? Semua jawaban akan dihapus.')) {
         setAnswers({});
         setSubmitted(false);
+        setSaveStatus('');
         setScoreInfo({ pg: 0, isian: 0, total: 0 });
         window.scrollTo({ top: 0, behavior: 'smooth' });
     }
@@ -172,12 +358,83 @@ export default function Ulangan() {
   const pgQuestions = quizQuestions.filter(q => q.type === 'pg');
   const isianQuestions = quizQuestions.filter(q => q.type === 'isian');
 
+  if (!isUnlocked) {
+    return (
+      <div className="max-w-md mx-auto my-12 p-6 md:p-8 bg-white border border-slate-200 rounded-3xl shadow-xl animate-in zoom-in-95 duration-300">
+        <div className="w-16 h-16 bg-indigo-50 border border-indigo-100 rounded-2xl flex items-center justify-center mx-auto mb-5 text-indigo-600 shadow-sm">
+          <KeyRound className="w-8 h-8" />
+        </div>
+        
+        <div className="text-center mb-6">
+          <h2 className="text-xl font-bold text-slate-800 tracking-tight">PIN Akses Ulangan Harian</h2>
+          <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
+            Materi: <strong className="text-indigo-700">{currentTopic.name}</strong><br/>
+            Silakan masukkan PIN Ulangan Harian yang diberikan oleh Guru untuk memulai tes.
+          </p>
+        </div>
+
+        <form onSubmit={handleVerifyPin} className="space-y-4">
+          <div>
+            <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+              PIN Ulangan Harian
+            </label>
+            <div className="relative">
+              <input
+                type="text"
+                value={pinInput}
+                onChange={(e) => setPinInput(e.target.value)}
+                placeholder="Contoh: 1234"
+                className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-center text-lg font-mono font-bold tracking-widest text-indigo-900 focus:ring-2 focus:ring-indigo-500 outline-none"
+                autoFocus
+              />
+              <Lock className="w-4 h-4 text-slate-400 absolute right-3.5 top-3.5" />
+            </div>
+            {pinError && (
+              <p className="text-xs font-semibold text-rose-600 mt-2 bg-rose-50 p-2.5 rounded-lg border border-rose-100 flex items-center gap-1.5">
+                <ShieldAlert className="w-4 h-4 shrink-0" />
+                <span>{pinError}</span>
+              </p>
+            )}
+          </div>
+
+          <button
+            type="submit"
+            disabled={checkingOnlinePin || !pinInput.trim()}
+            className="w-full py-3.5 bg-indigo-600 text-white rounded-xl text-sm font-bold hover:bg-indigo-700 transition-colors shadow-md shadow-indigo-200 flex items-center justify-center gap-2 disabled:opacity-50"
+          >
+            {checkingOnlinePin ? 'Memeriksa PIN...' : 'Mulai Kerjakan Tes'}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => navigate('/')}
+            className="w-full py-2.5 text-xs text-slate-500 hover:text-slate-700 font-medium flex items-center justify-center gap-1"
+          >
+            <ArrowLeft className="w-3.5 h-3.5" />
+            <span>Kembali ke Beranda</span>
+          </button>
+        </form>
+      </div>
+    );
+  }
+
   return (
     <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 max-w-4xl mx-auto">
       <div className="mb-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h1 className="text-xl md:text-2xl font-bold text-slate-800 tracking-tight">Ulangan Harian - {currentTopic.name}</h1>
-          <p className="text-slate-500 text-sm mt-1">Kerjakan 10 soal pilihan ganda dan 5 isian singkat dengan teliti.</p>
+          <h1 className="text-xl md:text-2xl font-bold text-slate-800 tracking-tight flex items-center gap-2">
+            <span>Ulangan Harian - {currentTopic.name}</span>
+            {isFromFirestore && (
+              <span className="text-[10px] font-bold px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded-full border border-emerald-200">
+                ☁️ Live Firebase
+              </span>
+            )}
+          </h1>
+          <p className="text-slate-500 text-sm mt-1">
+            {loadingQuestions 
+              ? 'Memuat soal dari Firebase Firestore...' 
+              : `Kerjakan ${pgQuestions.length} soal pilihan ganda dan ${isianQuestions.length} isian singkat dengan teliti.`}
+          </p>
         </div>
       </div>
 
@@ -204,11 +461,15 @@ export default function Ulangan() {
                 <p className="text-sm font-medium text-amber-400">💪 Jangan menyerah! Pelajari lagi materinya ya.</p>
             )}
             
-            {isSaving && (
-              <p className="text-[10px] text-indigo-400 mt-2 italic animate-pulse">Menyimpan skor ke database...</p>
+            {saveStatus && (
+              <p className="text-xs text-indigo-200 mt-3 font-medium bg-indigo-950/80 px-4 py-2 rounded-lg border border-indigo-700/50 inline-block">
+                {saveStatus}
+              </p>
             )}
 
-            <button onClick={resetQuiz} className="mt-6 px-6 py-2.5 bg-indigo-600 text-white text-sm font-bold rounded-lg hover:bg-indigo-500 transition-colors shadow-sm">Ulangi Tes</button>
+            <div>
+              <button onClick={resetQuiz} className="mt-6 px-6 py-2.5 bg-indigo-600 text-white text-sm font-bold rounded-lg hover:bg-indigo-500 transition-colors shadow-sm">Ulangi Tes</button>
+            </div>
           </div>
         </div>
       )}

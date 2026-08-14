@@ -70,12 +70,12 @@ export default function TopicLayout() {
             <div className="text-right">
               <p className="text-[10px] text-slate-400 font-bold uppercase">Siswa</p>
               <p className="text-sm font-bold text-indigo-600 line-clamp-1 max-w-[150px]">
-                {user?.user_metadata.full_name || user?.email || 'Tamu'}
+                {user?.fullName || (user as any)?.user_metadata?.full_name || user?.email || 'Tamu'}
               </p>
             </div>
             <div className="w-10 h-10 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-600 font-bold overflow-hidden border border-indigo-200 shadow-sm">
-                {user?.user_metadata.avatar_url ? (
-                  <img src={user.user_metadata.avatar_url} alt="Profile" className="w-full h-full object-cover" />
+                {(user as any)?.user_metadata?.avatar_url ? (
+                  <img src={(user as any).user_metadata.avatar_url} alt="Profile" className="w-full h-full object-cover" />
                 ) : (
                   <UserIcon className="w-5 h-5" />
                 )}

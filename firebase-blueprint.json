@@ -1,0 +1,59 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "Profil siswa yang terdaftar di Firebase",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string" },
+        "fullName": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["uid", "email", "fullName"]
+    },
+    "Score": {
+      "title": "Score",
+      "description": "Catatan nilai hasil ujian siswa",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "fullName": { "type": "string" },
+        "email": { "type": "string" },
+        "topicId": { "type": "string" },
+        "topicName": { "type": "string" },
+        "score": { "type": "number" },
+        "correctPilihan": { "type": "number" },
+        "correctIsian": { "type": "number" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["fullName", "topicId", "topicName", "score"]
+    },
+    "BankSoal": {
+      "title": "Bank Soal",
+      "description": "Koleksi bank soal dan kunci jawaban per materi",
+      "type": "object",
+      "properties": {
+        "topicId": { "type": "string" },
+        "topicName": { "type": "string" },
+        "questions": { "type": "array" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["topicId", "questions"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "Koleksi data profil siswa"
+    },
+    "/scores/{scoreId}": {
+      "schema": { "$ref": "#/entities/Score" },
+      "description": "Koleksi data nilai hasil ujian siswa"
+    },
+    "/bank_soal/{topicId}": {
+      "schema": { "$ref": "#/entities/BankSoal" },
+      "description": "Koleksi bank soal matematika per bab/materi"
+    }
+  }
+}
