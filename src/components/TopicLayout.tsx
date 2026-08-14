@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { NavLink, Outlet, useParams, Link, useLocation } from 'react-router-dom';
-import { BookOpen, Gamepad2, PenTool, GraduationCap, ArrowLeft, User as UserIcon, X, Home, ChevronRight } from 'lucide-react';
+import { NavLink, Outlet, useParams, Link, useLocation, Navigate } from 'react-router-dom';
+import { BookOpen, Gamepad2, PenTool, GraduationCap, ArrowLeft, User as UserIcon, X, Home, ChevronRight, Loader2 } from 'lucide-react';
 import { topics } from '../lib/topics';
 import { useAuth } from '../lib/AuthContext';
 
@@ -10,10 +10,25 @@ const LOGO_FALLBACK = "https://lh3.googleusercontent.com/d/1BnEiNri7kLjPFOUzKEAJ
 export default function TopicLayout() {
   const { topicId } = useParams();
   const location = useLocation();
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const currentTopic = topics.find(t => t.id === topicId) || { name: 'Topik Tidak Ditemukan' };
+
+  if (authLoading) {
+    return (
+      <div className="h-screen w-full flex items-center justify-center bg-slate-50">
+        <div className="flex flex-col items-center gap-3">
+          <Loader2 className="w-8 h-8 text-indigo-600 animate-spin" />
+          <p className="text-sm font-medium text-slate-500">Memeriksa status akun siswa...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <Navigate to="/" replace />;
+  }
 
   const menuItems = [
     { name: 'Materi', path: 'materi', icon: BookOpen, desc: 'Rangkuman konsep & rumus' },
