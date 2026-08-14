@@ -246,7 +246,16 @@ export default function Home() {
       <header className="bg-indigo-900 text-white border-b border-indigo-800 sticky top-0 z-20 shadow-sm">
          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
             <div className="flex items-center gap-2.5 cursor-pointer relative" onClick={() => navigate('/')}>
-               <img src="/logo.png" alt="MathFun Logo" className="w-10 h-10 object-contain rounded-lg shadow-sm bg-indigo-950 p-0.5 border border-indigo-700/50" />
+               <img
+                 src="/logo.png"
+                 onError={(e) => {
+                   if (e.currentTarget.src !== 'https://lh3.googleusercontent.com/d/1BnEiNri7kLjPFOUzKEAJaxnWwI1bTuNd') {
+                     e.currentTarget.src = 'https://lh3.googleusercontent.com/d/1BnEiNri7kLjPFOUzKEAJaxnWwI1bTuNd';
+                   }
+                 }}
+                 alt="MathFun Logo"
+                 className="w-10 h-10 object-contain rounded-lg shadow-sm bg-indigo-950 p-0.5 border border-indigo-700/50"
+               />
                <div className="flex items-center gap-1.5">
                  <h1 className="text-xl font-bold tracking-tight">MathFun <span className="text-indigo-300 underline decoration-2 decoration-orange-400">SMP</span></h1>
                  {getSpreadsheetId() && (
