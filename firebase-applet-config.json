@@ -1,12 +1,12 @@
 {
-  "projectId": "distinguished-pad-ht8c4",
-  "appId": "1:822155747768:web:73c14bc7fc46b1a0e4ef4d",
-  "apiKey": "AIzaSyCMXsYq1z3TRe3bwYGWRnML2FZWYVOl-cs",
-  "authDomain": "distinguished-pad-ht8c4.firebaseapp.com",
-  "firestoreDatabaseId": "ai-studio-mathfun-d0a4916e-f49e-4b9b-a4bd-82ffdec767f0",
-  "storageBucket": "distinguished-pad-ht8c4.firebasestorage.app",
-  "messagingSenderId": "822155747768",
+  "projectId": "mathfun-dad67",
+  "appId": "1:532565397422:web:56c8a700fc01be516c823f",
+  "apiKey": "AIzaSyCtYb-_4gbhJnTHyjdz2zsifarzxDJDZH0",
+  "authDomain": "mathfun-dad67.firebaseapp.com",
+  "firestoreDatabaseId": "(default)",
+  "storageBucket": "mathfun-dad67.firebasestorage.app",
+  "messagingSenderId": "532565397422",
   "measurementId": "",
-  "oAuthClientId": "822155747768-imjs0q7ous6mc3eu0t4elkfmi4o88r8f.apps.googleusercontent.com",
+  "oAuthClientId": "",
   "recaptchaSiteKey": ""
 }

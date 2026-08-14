@@ -25,9 +25,13 @@ import firebaseConfig from '../../firebase-applet-config.json';
 
 const app = initializeApp(firebaseConfig);
 
-export const db = initializeFirestore(app, {
-  experimentalAutoDetectLongPolling: true,
-}, firebaseConfig.firestoreDatabaseId);
+const firestoreDbId = (firebaseConfig.firestoreDatabaseId && firebaseConfig.firestoreDatabaseId !== "(default)")
+  ? firebaseConfig.firestoreDatabaseId 
+  : undefined;
+
+export const db = firestoreDbId 
+  ? initializeFirestore(app, { experimentalAutoDetectLongPolling: true }, firestoreDbId)
+  : initializeFirestore(app, { experimentalAutoDetectLongPolling: true });
 
 export const auth = getAuth(app);
 
