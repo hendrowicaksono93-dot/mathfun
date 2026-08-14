@@ -246,14 +246,9 @@ export default function Home() {
       <header className="bg-indigo-900 text-white border-b border-indigo-800 sticky top-0 z-20 shadow-sm">
          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
             <div className="flex items-center gap-2.5 cursor-pointer relative" onClick={() => navigate('/')}>
-               <div className="relative w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center font-bold font-mono shadow-inner border border-indigo-500">
-                 M
-                 {getSpreadsheetId() && (
-                   <span className="absolute -top-1 -right-1 w-3 h-3 bg-emerald-400 rounded-full border-2 border-indigo-900 animate-pulse shadow-[0_0_8px_rgba(52,211,153,0.9)]" title="Google Spreadsheet Terhubung"></span>
-                 )}
-               </div>
+               <img src="/logo.png" alt="MathFun Logo" className="w-10 h-10 object-contain rounded-lg shadow-sm bg-indigo-950 p-0.5 border border-indigo-700/50" />
                <div className="flex items-center gap-1.5">
-                 <h1 className="text-xl font-bold tracking-tight">MATH-SMP <span className="text-indigo-300 underline decoration-2 decoration-orange-400">PRO</span></h1>
+                 <h1 className="text-xl font-bold tracking-tight">MathFun <span className="text-indigo-300 underline decoration-2 decoration-orange-400">SMP</span></h1>
                  {getSpreadsheetId() && (
                    <span className="hidden sm:inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-[10px] font-semibold border border-emerald-500/30">
                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>

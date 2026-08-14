@@ -21,9 +21,10 @@ export default function TopicLayout() {
       {/* Sidebar Navigation */}
       <aside className="w-full md:w-72 bg-indigo-900 text-white flex flex-col flex-shrink-0 border-r border-indigo-800">
         <div className="p-6 border-b border-indigo-800">
-          <Link to="/" className="inline-flex items-center space-x-2 text-indigo-300 hover:text-indigo-100 transition-colors mb-4 text-sm font-medium">
-            <ArrowLeft className="w-4 h-4" />
-            <span>Beranda</span>
+          <Link to="/" className="inline-flex items-center space-x-2 text-indigo-200 hover:text-white transition-colors mb-4 text-sm font-medium">
+            <img src="/logo.png" alt="MathFun Logo" className="w-6 h-6 object-contain rounded bg-indigo-950 p-0.5" />
+            <ArrowLeft className="w-3.5 h-3.5 ml-1" />
+            <span>MathFun SMP</span>
           </Link>
           <h1 className="text-xl font-bold tracking-tight leading-tight">{currentTopic.name}</h1>
           <p className="text-xs text-indigo-300 mt-2 uppercase tracking-widest font-semibold flex items-center gap-1">
