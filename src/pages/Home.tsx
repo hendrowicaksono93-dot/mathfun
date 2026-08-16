@@ -15,7 +15,8 @@ import {
   getGuruPin,
   setGuruPin,
   getUlanganPin,
-  setUlanganPin
+  setUlanganPin,
+  syncAllFirestoreDataToSpreadsheet
 } from '../lib/sheets';
 
 interface LeaderboardEntry {
@@ -55,6 +56,7 @@ export default function Home() {
   const [sheetMsg, setSheetMsg] = useState('');
   const [creatingSheet, setCreatingSheet] = useState(false);
   const [syncingBankSoal, setSyncingBankSoal] = useState(false);
+  const [syncingFirestoreToSheet, setSyncingFirestoreToSheet] = useState(false);
 
   // Otomatis buka modal login jika siswa belum masuk
   useEffect(() => {
@@ -73,6 +75,18 @@ export default function Home() {
       setSheetMsg(`⚠️ ${result.message}`);
     }
     setSyncingBankSoal(false);
+  };
+
+  const handleSyncFirestoreToSheet = async () => {
+    setSyncingFirestoreToSheet(true);
+    setSheetMsg('🔄 Mengirim seluruh data siswa dan nilai ulangan dari Firestore ke Google Spreadsheet...');
+    const result = await syncAllFirestoreDataToSpreadsheet(scriptUrlInput);
+    if (result.success) {
+      setSheetMsg(`✅ ${result.message}`);
+    } else {
+      setSheetMsg(`⚠️ ${result.message}`);
+    }
+    setSyncingFirestoreToSheet(false);
   };
 
   // Check if current user or session is Guru/Admin mode
@@ -761,7 +775,7 @@ export default function Home() {
                   className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono focus:ring-2 focus:ring-emerald-500 outline-none text-slate-800"
                 />
                 
-                <div className="mt-3">
+                <div className="mt-3 space-y-2.5">
                   <button
                     type="button"
                     onClick={handleSyncBankSoal}
@@ -770,8 +784,17 @@ export default function Home() {
                   >
                     <span>{syncingBankSoal ? '🔄 Mensinkronkan Soal...' : '📥 Sync Soal dari Spreadsheet ke Firebase'}</span>
                   </button>
+
+                  <button
+                    type="button"
+                    onClick={handleSyncFirestoreToSheet}
+                    disabled={syncingFirestoreToSheet || !scriptUrlInput}
+                    className="w-full py-2.5 px-4 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl text-xs font-bold hover:bg-emerald-100 transition-colors flex items-center justify-center gap-2 disabled:opacity-50 disabled:pointer-events-none"
+                  >
+                    <span>{syncingFirestoreToSheet ? '🔄 Mengekspor Data...' : '📤 Ekspor Data Siswa & Nilai Firestore ke Spreadsheet'}</span>
+                  </button>
                   <p className="text-[11px] text-slate-400 mt-1">
-                    Membaca sheet <code>Bank Soal</code> di Google Sheet dan menyimpannya secara otomatis ke database Firebase Firestore.
+                    Gunakan tombol di atas untuk menyinkronkan seluruh akun siswa (seperti <em>Zaky Faezya</em>) dan nilai ulangan harian yang ada di Firestore langsung ke lembar Spreadsheet.
                   </p>
                 </div>
               </div>

@@ -1,4 +1,5 @@
 // Utility for integrating Google Sheets API and optional Webhook Sync
+import { db, doc, getDoc, collection, getDocs } from './firebase';
 
 const SPREADSHEET_ID_KEY = 'mathfun_spreadsheet_id';
 const ACCESS_TOKEN_KEY = 'mathfun_google_access_token';
@@ -73,6 +74,52 @@ export const getScriptUrl = (): string => {
 export const setScriptUrl = (url: string): void => {
   localStorage.setItem(SCRIPT_URL_KEY, url.trim());
 };
+
+/**
+ * Resolves Google Apps Script Web App URL from localStorage or Firestore settings
+ */
+export async function resolveScriptUrl(): Promise<string> {
+  let url = getScriptUrl();
+  if (url) return url;
+
+  try {
+    const docRef = doc(db, 'settings', 'app_config');
+    const snap = await getDoc(docRef);
+    if (snap.exists()) {
+      const data = snap.data();
+      if (data?.scriptUrl) {
+        setScriptUrl(data.scriptUrl);
+        return data.scriptUrl;
+      }
+    }
+  } catch (e) {
+    console.warn('Gagal membaca scriptUrl dari Firestore:', e);
+  }
+  return '';
+}
+
+/**
+ * Resolves Spreadsheet ID from localStorage or Firestore settings
+ */
+export async function resolveSpreadsheetId(): Promise<string> {
+  let id = getSpreadsheetId();
+  if (id) return id;
+
+  try {
+    const docRef = doc(db, 'settings', 'app_config');
+    const snap = await getDoc(docRef);
+    if (snap.exists()) {
+      const data = snap.data();
+      if (data?.spreadsheetId) {
+        setSpreadsheetId(data.spreadsheetId);
+        return data.spreadsheetId;
+      }
+    }
+  } catch (e) {
+    console.warn('Gagal membaca spreadsheetId dari Firestore:', e);
+  }
+  return '';
+}
 
 export interface StudentRegistrationData {
   fullName: string;
@@ -299,9 +346,9 @@ export async function createNewSpreadsheet(accessToken: string): Promise<string>
  * Appends student registration data to Google Spreadsheet
  */
 export async function appendStudentToSheet(student: StudentRegistrationData): Promise<{ success: boolean; message: string }> {
-  const spreadsheetId = getSpreadsheetId();
+  const scriptUrl = await resolveScriptUrl();
+  const spreadsheetId = await resolveSpreadsheetId();
   const token = getGoogleAccessToken();
-  const scriptUrl = getScriptUrl();
 
   const formattedDate = student.createdAt || new Date().toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' });
 
@@ -310,7 +357,8 @@ export async function appendStudentToSheet(student: StudentRegistrationData): Pr
     try {
       await fetch(scriptUrl, {
         method: 'POST',
-        headers: { 'Content-Type': 'text/plain' }, // Avoid CORS preflight in Apps Script
+        mode: 'no-cors',
+        headers: { 'Content-Type': 'text/plain' },
         body: JSON.stringify({
           action: 'add_student',
           fullName: student.fullName,
@@ -367,9 +415,9 @@ export async function appendStudentToSheet(student: StudentRegistrationData): Pr
  * Appends test score data to Google Spreadsheet
  */
 export async function appendScoreToSheet(score: ScoreData): Promise<{ success: boolean; message: string }> {
-  const spreadsheetId = getSpreadsheetId();
+  const scriptUrl = await resolveScriptUrl();
+  const spreadsheetId = await resolveSpreadsheetId();
   const token = getGoogleAccessToken();
-  const scriptUrl = getScriptUrl();
 
   const formattedDate = score.createdAt || new Date().toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' });
 
@@ -378,6 +426,7 @@ export async function appendScoreToSheet(score: ScoreData): Promise<{ success: b
     try {
       await fetch(scriptUrl, {
         method: 'POST',
+        mode: 'no-cors',
         headers: { 'Content-Type': 'text/plain' },
         body: JSON.stringify({
           action: 'add_score',
@@ -440,5 +489,107 @@ export async function appendScoreToSheet(score: ScoreData): Promise<{ success: b
   } catch (error: any) {
     console.error('Gagal mencatat nilai ke Google Sheet:', error);
     return { success: false, message: error.message || 'Gagal menyimpan nilai ke Google Sheet' };
+  }
+}
+
+/**
+ * Synchronizes ALL existing users and test scores from Firestore to Google Spreadsheet
+ */
+export async function syncAllFirestoreDataToSpreadsheet(customScriptUrl?: string): Promise<{
+  success: boolean;
+  totalUsers: number;
+  totalScores: number;
+  message: string;
+}> {
+  const scriptUrl = customScriptUrl || await resolveScriptUrl();
+  if (!scriptUrl) {
+    return {
+      success: false,
+      totalUsers: 0,
+      totalScores: 0,
+      message: 'URL Google Apps Script Web App belum diisi di Pengaturan Guru.',
+    };
+  }
+
+  try {
+    // 1. Fetch all users from Firestore
+    const usersSnap = await getDocs(collection(db, 'users'));
+    let userCount = 0;
+    for (const docSnap of usersSnap.docs) {
+      const u = docSnap.data();
+      const fullName = u.fullName || 'Siswa Anonim';
+      const email = u.email || '-';
+      const createdAt = u.createdAt 
+        ? new Date(u.createdAt).toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' }) 
+        : new Date().toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' });
+      
+      try {
+        await fetch(scriptUrl, {
+          method: 'POST',
+          mode: 'no-cors',
+          headers: { 'Content-Type': 'text/plain' },
+          body: JSON.stringify({
+            action: 'add_student',
+            fullName,
+            email,
+            createdAt,
+          }),
+        });
+        userCount++;
+      } catch (err) {
+        console.warn('Gagal sync user:', fullName, err);
+      }
+    }
+
+    // 2. Fetch all scores from Firestore
+    const scoresSnap = await getDocs(collection(db, 'scores'));
+    let scoreCount = 0;
+    for (const docSnap of scoresSnap.docs) {
+      const s = docSnap.data();
+      const fullName = s.fullName || s.studentName || 'Siswa Anonim';
+      const email = s.email || s.studentEmail || '-';
+      const topicName = s.topicName || s.topicId || 'Ulangan Harian';
+      const score = s.score !== undefined ? s.score : 0;
+      const correctPilihan = s.correctPilihan || 0;
+      const correctIsian = s.correctIsian || 0;
+      const createdAt = s.createdAt 
+        ? new Date(s.createdAt).toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' }) 
+        : new Date().toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' });
+
+      try {
+        await fetch(scriptUrl, {
+          method: 'POST',
+          mode: 'no-cors',
+          headers: { 'Content-Type': 'text/plain' },
+          body: JSON.stringify({
+            action: 'add_score',
+            fullName,
+            email,
+            topicName,
+            score,
+            correctPilihan,
+            correctIsian,
+            createdAt,
+          }),
+        });
+        scoreCount++;
+      } catch (err) {
+        console.warn('Gagal sync score:', err);
+      }
+    }
+
+    return {
+      success: true,
+      totalUsers: userCount,
+      totalScores: scoreCount,
+      message: `Berhasil mengekspor ${userCount} data siswa & ${scoreCount} hasil ujian dari Firestore ke Spreadsheet!`,
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      totalUsers: 0,
+      totalScores: 0,
+      message: `Gagal sinkronisasi data: ${error.message || error}`,
+    };
   }
 }
