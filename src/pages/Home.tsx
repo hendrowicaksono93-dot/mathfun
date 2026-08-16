@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowRight, Search, Menu, BookOpen, LogOut, Trophy, User as UserIcon, FileSpreadsheet, Settings, Plus, CheckCircle, KeyRound, Lock } from 'lucide-react';
+import { ArrowRight, Search, Menu, BookOpen, LogOut, Trophy, User as UserIcon, FileSpreadsheet, Settings, Plus, CheckCircle, KeyRound, Lock, Code, Copy, Check } from 'lucide-react';
 import { topics } from '../lib/topics';
 import { useAuth } from '../lib/AuthContext';
 import { db, collection, getDocs } from '../lib/firebase';
@@ -23,6 +23,295 @@ interface LeaderboardEntry {
   full_name: string;
   total_score: number;
 }
+
+const APPS_SCRIPT_CODE = `/**
+ * MATH-SMP PRO - Integration Script with Auto Setup, PIN Management & Bank Soal Sync
+ * Menyiapkan Sheet Data Siswa, Hasil Ujian (termasuk Jumlah Pelanggaran Anti-Curang),
+ * Pengaturan Guru, Pengaturan PIN Soal, & Bank Soal.
+ */
+
+// ==========================================
+// 1. FUNGSI SETUP OTOMATIS
+// ==========================================
+function setup() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+
+  // A. Setup Sheet "Data Siswa"
+  var sheetSiswa = ss.getSheetByName("Data Siswa");
+  if (!sheetSiswa) { sheetSiswa = ss.insertSheet("Data Siswa"); }
+  if (sheetSiswa.getLastRow() === 0) {
+    sheetSiswa.appendRow(["Nama Akun", "Email", "Waktu Daftar"]);
+    sheetSiswa.getRange(1, 1, 1, 3).setFontWeight("bold").setBackground("#d1fae5").setFontColor("#065f46");
+    sheetSiswa.setFrozenRows(1);
+  }
+
+  // B. Setup Sheet "Hasil Ujian" (Dengan Kolom Jumlah Pelanggaran)
+  var sheetUjian = ss.getSheetByName("Hasil Ujian");
+  if (!sheetUjian) { sheetUjian = ss.insertSheet("Hasil Ujian"); }
+  if (sheetUjian.getLastRow() === 0) {
+    sheetUjian.appendRow(["Nama Akun", "Email", "Bab / Materi", "Nilai", "Jawaban PG Benar", "Jawaban Isian Benar", "Jumlah Pelanggaran", "Waktu Selesai"]);
+    sheetUjian.getRange(1, 1, 1, 8).setFontWeight("bold").setBackground("#e0e7ff").setFontColor("#3730a3");
+    sheetUjian.setFrozenRows(1);
+  } else {
+    // Jika sheet sudah ada tapi masih 7 kolom lama, otomatis perbarui baris header ke 8 kolom
+    var headerCols = sheetUjian.getLastColumn();
+    if (headerCols < 8) {
+      sheetUjian.getRange(1, 1, 1, 8).setValues([[
+        "Nama Akun", "Email", "Bab / Materi", "Nilai", "Jawaban PG Benar", "Jawaban Isian Benar", "Jumlah Pelanggaran", "Waktu Selesai"
+      ]]).setFontWeight("bold").setBackground("#e0e7ff").setFontColor("#3730a3");
+    }
+  }
+
+  // C. Setup Sheet "Pengaturan Guru"
+  var sheetGuru = ss.getSheetByName("Pengaturan Guru");
+  if (!sheetGuru) { sheetGuru = ss.insertSheet("Pengaturan Guru"); }
+  if (sheetGuru.getLastRow() === 0) {
+    sheetGuru.appendRow(["Kode Akses Guru", "Kode Akses Ulangan (Global)", "Keterangan", "Terakhir Diubah"]);
+    sheetGuru.getRange(1, 1, 1, 4).setFontWeight("bold").setBackground("#fef3c7").setFontColor("#92400e");
+    sheetGuru.setFrozenRows(1);
+    sheetGuru.appendRow(["guru", "1234", "PIN Mode Guru & PIN Ulangan Global Backup", new Date().toLocaleString("id-ID")]);
+  }
+
+  // D. Setup Sheet "Pengaturan PIN Soal"
+  var sheetPinSoal = ss.getSheetByName("Pengaturan PIN Soal");
+  if (!sheetPinSoal) { sheetPinSoal = ss.insertSheet("Pengaturan PIN Soal"); }
+  if (sheetPinSoal.getLastRow() === 0) {
+    sheetPinSoal.appendRow(["ID Materi", "Judul Materi", "PIN Soal / Ulangan", "Status", "Terakhir Diubah"]);
+    sheetPinSoal.getRange(1, 1, 1, 5).setFontWeight("bold").setBackground("#dbeafe").setFontColor("#1e40af");
+    sheetPinSoal.setFrozenRows(1);
+
+    var daftarMateri = [
+      ["bilangan-bulat", "Bilangan Bulat", "1234", "Aktif"],
+      ["aljabar", "Aljabar", "1234", "Aktif"],
+      ["plsv-ptlsv", "Persamaan & Pertidaksamaan Linear Satu Variabel", "1234", "Aktif"],
+      ["aritmatika-sosial", "Aritmatika Sosial", "1234", "Aktif"],
+      ["perbandingan", "Perbandingan", "1234", "Aktif"],
+      ["unsur-geometri", "Unsur Geometri (Titik, Garis, Sudut)", "1234", "Aktif"],
+      ["pythagoras", "Teorema Pythagoras", "1234", "Aktif"],
+      ["bangun-datar", "Bangun Datar (Segitiga & Segiempat)", "1234", "Aktif"],
+      ["statistika", "Statistika", "1234", "Aktif"],
+      ["menyederhanakan-aljabar", "Menyederhanakan Aljabar", "1234", "Aktif"],
+      ["himpunan", "Himpunan", "1234", "Aktif"],
+      ["relasi-fungsi", "Relasi dan Fungsi", "1234", "Aktif"],
+      ["persamaan-garis-lurus", "Persamaan Garis Lurus", "1234", "Aktif"],
+      ["bangun-ruang-sisi-datar", "Bangun Ruang Sisi Datar", "1234", "Aktif"],
+      ["barisan-deret", "Barisan dan Deret", "1234", "Aktif"],
+      ["lingkaran", "Lingkaran", "1234", "Aktif"],
+      ["spldv", "SPLDV", "1234", "Aktif"],
+      ["geometri-kesebangunan", "Geometri (Kesebangunan dan Kongruen)", "1234", "Aktif"],
+      ["bangun-ruang-sisi-lengkung", "Bangun Ruang Sisi Lengkung", "1234", "Aktif"],
+      ["transformasi-geometri", "Transformasi Geometri", "1234", "Aktif"],
+      ["peluang", "Peluang", "1234", "Aktif"]
+    ];
+
+    var now = new Date().toLocaleString("id-ID");
+    for (var i = 0; i < daftarMateri.length; i++) {
+      sheetPinSoal.appendRow([daftarMateri[i][0], daftarMateri[i][1], daftarMateri[i][2], daftarMateri[i][3], now]);
+    }
+  }
+
+  // E. Setup Sheet "Bank Soal"
+  var sheetBank = ss.getSheetByName("Bank Soal");
+  if (!sheetBank) { sheetBank = ss.insertSheet("Bank Soal"); }
+  if (sheetBank.getLastRow() === 0) {
+    sheetBank.appendRow(["ID Materi", "Tipe (pg/isian)", "ID Soal", "Pertanyaan", "Opsi A", "Opsi B", "Opsi C", "Opsi D", "Kunci Jawaban", "Kesulitan", "Skor"]);
+    sheetBank.getRange(1, 1, 1, 11).setFontWeight("bold").setBackground("#f3e8ff").setFontColor("#6b21a8");
+    sheetBank.setFrozenRows(1);
+  }
+
+  Logger.log("✅ Setup berhasil!");
+}
+
+// ==========================================
+// 2. FUNGSI PENERIMA DATA (WEBHOOK POST)
+// ==========================================
+function doPost(e) {
+  try {
+    var data = JSON.parse(e.postData.contents);
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+
+    // 1. TAMBAH DATA SISWA
+    if (data.action === "add_student") {
+      var sheetSiswa = ss.getSheetByName("Data Siswa");
+      if (sheetSiswa) {
+        sheetSiswa.appendRow([
+          data.fullName || "Siswa Anonim",
+          data.email || "-",
+          data.createdAt || new Date().toLocaleString("id-ID")
+        ]);
+      }
+    } 
+
+    // 2. TAMBAH NILAI UJIAN + PELANGGARAN ANTI-CURANG
+    else if (data.action === "add_score") {
+      var sheetNilai = ss.getSheetByName("Hasil Ujian");
+      if (sheetNilai) {
+        sheetNilai.appendRow([
+          data.fullName || "Siswa Anonim",
+          data.email || "-",
+          data.topicName || "-",
+          data.score !== undefined ? data.score : 0,
+          data.correctPilihan !== undefined ? data.correctPilihan : 0,
+          data.correctIsian !== undefined ? data.correctIsian : 0,
+          data.tabSwitches !== undefined ? data.tabSwitches : 0,
+          data.createdAt || new Date().toLocaleString("id-ID")
+        ]);
+      }
+    }
+
+    // 3. UPDATE PIN GURU / GLOBAL
+    else if (data.action === "update_guru_pin") {
+      var sheetGuru = ss.getSheetByName("Pengaturan Guru");
+      if (sheetGuru) {
+        if (data.guruPin) sheetGuru.getRange(2, 1).setValue(data.guruPin);
+        if (data.ulanganPin) sheetGuru.getRange(2, 2).setValue(data.ulanganPin);
+        sheetGuru.getRange(2, 4).setValue(new Date().toLocaleString("id-ID"));
+      }
+    }
+
+    // 4. UPDATE PIN PER MATERI
+    else if (data.action === "update_topic_pin" && data.topicId) {
+      var sheetPin = ss.getSheetByName("Pengaturan PIN Soal");
+      if (sheetPin) {
+        var rows = sheetPin.getDataRange().getValues();
+        for (var i = 1; i < rows.length; i++) {
+          if (rows[i][0].toString().trim().toLowerCase() === data.topicId.toString().trim().toLowerCase()) {
+            if (data.pin) sheetPin.getRange(i + 1, 3).setValue(data.pin);
+            if (data.status) sheetPin.getRange(i + 1, 4).setValue(data.status);
+            sheetPin.getRange(i + 1, 5).setValue(new Date().toLocaleString("id-ID"));
+            break;
+          }
+        }
+      }
+    }
+
+    return ContentService.createTextOutput(JSON.stringify({ status: "success", message: "Data berhasil diperbarui!" }))
+      .setMimeType(ContentService.MimeType.JSON);
+      
+  } catch (err) {
+    return ContentService.createTextOutput(JSON.stringify({ status: "error", message: err.toString() }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+}
+
+// ==========================================
+// 3. FUNGSI AMBIL DATA & BANK SOAL (WEBHOOK GET)
+// ==========================================
+function doGet(e) {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var action = e && e.parameter ? e.parameter.action : "";
+
+    // Ambil PIN Guru & PIN Global Backup
+    var sheetGuru = ss.getSheetByName("Pengaturan Guru");
+    var guruPin = "guru";
+    var ulanganPin = "";
+    if (sheetGuru && sheetGuru.getLastRow() >= 2) {
+      guruPin = sheetGuru.getRange(2, 1).getValue().toString().trim();
+      ulanganPin = sheetGuru.getRange(2, 2).getValue().toString().trim();
+    }
+
+    // A. Ambil Seluruh PIN Materi
+    if (action === "get_topic_pins" || action === "get_pins") {
+      var sheetPin = ss.getSheetByName("Pengaturan PIN Soal");
+      var pins = {};
+      if (sheetPin && sheetPin.getLastRow() >= 2) {
+        var data = sheetPin.getDataRange().getValues();
+        for (var i = 1; i < data.length; i++) {
+          var topicId = data[i][0] ? data[i][0].toString().trim().toLowerCase() : "";
+          var pinVal = data[i][2] !== undefined ? data[i][2].toString().trim() : "";
+          if (topicId) { pins[topicId] = pinVal; }
+        }
+      }
+      return ContentService.createTextOutput(JSON.stringify({ 
+        status: "success", 
+        pins: pins, 
+        guruPin: guruPin, 
+        ulanganPin: ulanganPin 
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // B. AMBIL BANK SOAL DARI SPREADSHEET (Auto Convert slug & kunci huruf A/B/C/D)
+    if (action === "get_bank_soal") {
+      var sheetBank = ss.getSheetByName("Bank Soal");
+      var bankSoal = {};
+      if (sheetBank && sheetBank.getLastRow() >= 2) {
+        var data = sheetBank.getDataRange().getValues();
+        for (var i = 1; i < data.length; i++) {
+          var row = data[i];
+          var rawTopic = row[0] ? row[0].toString().trim() : "";
+          if (!rawTopic) continue;
+
+          // Mengubah "Bilangan Bulat" -> "bilangan-bulat"
+          var topicId = rawTopic.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+          var type = row[1] ? row[1].toString().trim().toLowerCase() : "pg";
+          var idSoal = row[2] ? row[2].toString().trim() : ("q" + i);
+          var question = row[3] ? row[3].toString().trim() : "";
+
+          if (!question) continue;
+
+          var opsiA = row[4] !== undefined && row[4] !== null ? row[4].toString().trim() : "";
+          var opsiB = row[5] !== undefined && row[5] !== null ? row[5].toString().trim() : "";
+          var opsiC = row[6] !== undefined && row[6] !== null ? row[6].toString().trim() : "";
+          var opsiD = row[7] !== undefined && row[7] !== null ? row[7].toString().trim() : "";
+          var rawAnswer = row[8] !== undefined && row[8] !== null ? row[8].toString().trim() : "";
+          var difficulty = row[9] ? row[9].toString().trim() : "Sedang";
+          var score = row[10] ? Number(row[10]) || 10 : 10;
+
+          var options = type === "pg" ? [opsiA, opsiB, opsiC, opsiD] : [];
+          var answer = rawAnswer;
+
+          // Jika di Kunci Jawaban diisi huruf A, B, C, atau D
+          if (type === "pg") {
+            var upper = rawAnswer.toUpperCase();
+            if (upper === "A" && opsiA) answer = opsiA;
+            else if (upper === "B" && opsiB) answer = opsiB;
+            else if (upper === "C" && opsiC) answer = opsiC;
+            else if (upper === "D" && opsiD) answer = opsiD;
+          }
+
+          if (!bankSoal[topicId]) { bankSoal[topicId] = []; }
+
+          var qObj = {
+            id: idSoal,
+            type: type === "isian" ? "isian" : "pg",
+            question: question,
+            answer: answer,
+            difficulty: difficulty,
+            score: score
+          };
+
+          if (type === "pg") { qObj.options = options; }
+
+          bankSoal[topicId].push(qObj);
+        }
+      }
+
+      return ContentService.createTextOutput(JSON.stringify({ 
+        status: "success", 
+        bankSoal: bankSoal 
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // C. Ambil PIN Guru & PIN Global Saja
+    if (action === "get_guru_pin" || action === "get_ulangan_pin") {
+      return ContentService.createTextOutput(JSON.stringify({ 
+        status: "success", 
+        guruPin: guruPin, 
+        ulanganPin: ulanganPin 
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    return ContentService.createTextOutput(JSON.stringify({ 
+      status: "online", 
+      message: "MathFun Webhook Active & Ready!" 
+    })).setMimeType(ContentService.MimeType.JSON);
+
+  } catch (err) {
+    return ContentService.createTextOutput(JSON.stringify({ status: "error", message: err.toString() }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+}`;
 
 export default function Home() {
   const navigate = useNavigate();
@@ -57,6 +346,8 @@ export default function Home() {
   const [creatingSheet, setCreatingSheet] = useState(false);
   const [syncingBankSoal, setSyncingBankSoal] = useState(false);
   const [syncingFirestoreToSheet, setSyncingFirestoreToSheet] = useState(false);
+  const [showCodeModal, setShowCodeModal] = useState(false);
+  const [copiedCode, setCopiedCode] = useState(false);
 
   // Otomatis buka modal login jika siswa belum masuk
   useEffect(() => {
@@ -778,6 +1069,15 @@ export default function Home() {
                 <div className="mt-3 space-y-2.5">
                   <button
                     type="button"
+                    onClick={() => setShowCodeModal(true)}
+                    className="w-full py-2.5 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-colors flex items-center justify-center gap-2 border border-slate-300"
+                  >
+                    <Code className="w-4 h-4 text-indigo-600" />
+                    <span>📋 Salin Kode Apps Script (Kode.gs) Terbaru</span>
+                  </button>
+
+                  <button
+                    type="button"
                     onClick={handleSyncBankSoal}
                     disabled={syncingBankSoal || !scriptUrlInput}
                     className="w-full py-2.5 px-4 bg-indigo-50 border border-indigo-200 text-indigo-700 rounded-xl text-xs font-bold hover:bg-indigo-100 transition-colors flex items-center justify-center gap-2 disabled:opacity-50 disabled:pointer-events-none"
@@ -821,6 +1121,67 @@ export default function Home() {
                 className="flex-1 py-3 bg-emerald-600 text-white rounded-xl text-sm font-bold hover:bg-emerald-700 shadow-md shadow-emerald-200 active:scale-[0.98] transition-all flex items-center justify-center gap-2"
               >
                 <span>💾 Simpan Pengaturan</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Kode Apps Script (Kode.gs) */}
+      {showCodeModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-2xl w-full shadow-2xl overflow-hidden border border-slate-100 flex flex-col max-h-[90vh] animate-in zoom-in-95 duration-200">
+            <div className="p-5 border-b border-slate-100 flex items-center justify-between bg-slate-50">
+              <div className="flex items-center gap-2">
+                <Code className="w-5 h-5 text-indigo-600" />
+                <h3 className="font-bold text-slate-800 text-base">Kode Google Apps Script (Kode.gs)</h3>
+              </div>
+              <button
+                onClick={() => setShowCodeModal(false)}
+                className="text-slate-400 hover:text-slate-600 text-sm font-bold p-1"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="p-5 overflow-y-auto space-y-4 text-xs">
+              <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-3.5 text-indigo-900 text-xs leading-relaxed">
+                <p className="font-bold mb-1">📌 Panduan Pemasangan di Google Spreadsheet:</p>
+                <ol className="list-decimal pl-4 space-y-1 text-[11px] text-indigo-800">
+                  <li>Buka Google Spreadsheet Guru &gt; klik menu <strong>Ekstensi</strong> &gt; <strong>Apps Script</strong>.</li>
+                  <li>Hapus kode lama di file <code>Kode.gs</code>, lalu tempel kode di bawah ini.</li>
+                  <li>Klik <strong>Deploy (Terapkan)</strong> &gt; <strong>Deployment Baru</strong> &gt; Pilih Jenis <strong>Aplikasi Web</strong>.</li>
+                  <li>Ubah <em>Who has access (Siapa yang memiliki akses)</em> menjadi <strong>Anyone (Siapa saja)</strong>.</li>
+                  <li>Salin URL Web App yang dihasilkan lalu tempel ke kolom <em>Google Apps Script Web App URL</em> di pengaturan guru.</li>
+                </ol>
+              </div>
+
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => {
+                    navigator.clipboard.writeText(APPS_SCRIPT_CODE);
+                    setCopiedCode(true);
+                    setTimeout(() => setCopiedCode(false), 2500);
+                  }}
+                  className="absolute top-3 right-3 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold text-[11px] flex items-center gap-1.5 shadow-md transition-all active:scale-95"
+                >
+                  {copiedCode ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                  <span>{copiedCode ? 'Tersalin!' : 'Salin Kode'}</span>
+                </button>
+                <pre className="bg-slate-900 text-slate-100 p-4 rounded-xl font-mono text-[11px] overflow-x-auto max-h-80 leading-relaxed">
+                  {APPS_SCRIPT_CODE}
+                </pre>
+              </div>
+            </div>
+
+            <div className="p-4 bg-slate-50 border-t border-slate-100 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setShowCodeModal(false)}
+                className="px-5 py-2.5 bg-indigo-600 text-white font-bold rounded-xl text-xs hover:bg-indigo-700 transition-colors shadow-sm"
+              >
+                Tutup
               </button>
             </div>
           </div>

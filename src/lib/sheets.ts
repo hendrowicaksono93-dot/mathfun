@@ -136,6 +136,7 @@ export interface ScoreData {
   score: number;
   correctPilihan: number;
   correctIsian: number;
+  tabSwitches?: number;
   createdAt?: string;
 }
 
@@ -188,6 +189,7 @@ export async function createNewSpreadsheet(accessToken: string): Promise<string>
                     { userEnteredValue: { stringValue: 'Nilai' } },
                     { userEnteredValue: { stringValue: 'Jawaban PG Benar' } },
                     { userEnteredValue: { stringValue: 'Jawaban Isian Benar' } },
+                    { userEnteredValue: { stringValue: 'Jumlah Pelanggaran' } },
                     { userEnteredValue: { stringValue: 'Waktu Selesai' } },
                   ],
                 },
@@ -438,6 +440,7 @@ export async function appendScoreToSheet(score: ScoreData): Promise<{ success: b
           score: score.score,
           correctPilihan: score.correctPilihan,
           correctIsian: score.correctIsian,
+          tabSwitches: score.tabSwitches !== undefined ? score.tabSwitches : 0,
           createdAt: formattedDate,
         }),
       });
@@ -457,7 +460,7 @@ export async function appendScoreToSheet(score: ScoreData): Promise<{ success: b
   }
 
   try {
-    const range = encodeURIComponent('Hasil Ujian!A:G');
+    const range = encodeURIComponent('Hasil Ujian!A:H');
     const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${range}:append?valueInputOption=USER_ENTERED`;
 
     const res = await fetch(url, {
@@ -475,6 +478,7 @@ export async function appendScoreToSheet(score: ScoreData): Promise<{ success: b
             score.score,
             score.correctPilihan,
             score.correctIsian,
+            score.tabSwitches !== undefined ? score.tabSwitches : 0,
             formattedDate,
           ],
         ],
@@ -554,6 +558,7 @@ export async function syncAllFirestoreDataToSpreadsheet(customScriptUrl?: string
       const score = s.score !== undefined ? s.score : 0;
       const correctPilihan = s.correctPilihan || 0;
       const correctIsian = s.correctIsian || 0;
+      const tabSwitches = s.tabSwitches !== undefined ? s.tabSwitches : 0;
       const createdAt = s.createdAt 
         ? new Date(s.createdAt).toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' }) 
         : new Date().toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' });
@@ -571,6 +576,7 @@ export async function syncAllFirestoreDataToSpreadsheet(customScriptUrl?: string
             score,
             correctPilihan,
             correctIsian,
+            tabSwitches,
             createdAt,
           }),
         });

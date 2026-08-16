@@ -554,6 +554,7 @@ export default function Ulangan() {
         score: total,
         correctPilihan: pg,
         correctIsian: isian,
+        tabSwitches: violationCount,
         createdAt: nowStr,
       });
 
