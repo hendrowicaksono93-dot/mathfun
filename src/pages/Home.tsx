@@ -113,7 +113,7 @@ export default function Home() {
     e.preventDefault();
     const cleanPass = guruPassInput.trim().toLowerCase();
     const currentPin = getGuruPin().trim().toLowerCase();
-    if (cleanPass === currentPin || cleanPass === 'guru' || cleanPass === 'admin' || cleanPass === '123456' || cleanPass === 'mathfun') {
+    if (cleanPass === currentPin || cleanPass === 'guru' || cleanPass === 'admin' || cleanPass === 'mathfun') {
       setUnlockedGuru(true);
       setShowGuruModal(false);
       setGuruPassError('');
@@ -243,7 +243,7 @@ export default function Home() {
       spreadsheetId: sheetIdInput,
       scriptUrl: scriptUrlInput,
       guruPin: guruPinSettingInput.trim() || 'guru',
-      ulanganPin: ulanganPinSettingInput.trim() || '1234',
+      ulanganPin: ulanganPinSettingInput.trim() || '',
     });
 
     // Attempt webhook update to Apps Script if scriptUrl is present
@@ -255,7 +255,7 @@ export default function Home() {
           body: JSON.stringify({
             action: 'update_guru_pin',
             guruPin: guruPinSettingInput.trim() || 'guru',
-            ulanganPin: ulanganPinSettingInput.trim() || '1234',
+            ulanganPin: ulanganPinSettingInput.trim() || '',
           }),
         });
       } catch (err) {
@@ -749,17 +749,17 @@ export default function Home() {
 
               <div className="border-t border-slate-100 pt-4">
                 <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                  PIN Akses Ujian / Ulangan Harian Siswa
+                  PIN Akses Ujian / Ulangan Harian Siswa (Global)
                 </label>
                 <input 
                   type="text"
                   value={ulanganPinSettingInput}
                   onChange={(e) => setUlanganPinSettingInput(e.target.value)}
-                  placeholder="Contoh: 1234"
+                  placeholder="Atur PIN khusus atau atur per bab di Spreadsheet"
                   className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-mono focus:ring-2 focus:ring-indigo-500 outline-none text-indigo-900 font-bold"
                 />
                 <p className="text-[11px] text-slate-400 mt-1">
-                  Siswa wajib memasukkan PIN ini sebelum memulai pengerjaan Ulangan Harian. (Default: <code>1234</code>)
+                  PIN global ini opsional jika Anda sudah mengatur PIN khusus per bab pada sheet <code>Pengaturan PIN Soal</code> di Google Spreadsheet.
                 </p>
               </div>
 

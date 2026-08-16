@@ -27,12 +27,14 @@ export const setGuruPin = (pin: string): void => {
 };
 
 export const getUlanganPin = (): string => {
-  return localStorage.getItem(ULANGAN_PIN_KEY) || '1234';
+  return localStorage.getItem(ULANGAN_PIN_KEY) || '';
 };
 
 export const setUlanganPin = (pin: string): void => {
   if (pin && pin.trim()) {
     localStorage.setItem(ULANGAN_PIN_KEY, pin.trim());
+  } else {
+    localStorage.removeItem(ULANGAN_PIN_KEY);
   }
 };
 
@@ -211,7 +213,7 @@ export async function createNewSpreadsheet(accessToken: string): Promise<string>
                 {
                   values: [
                     { userEnteredValue: { stringValue: getGuruPin() || 'guru' } },
-                    { userEnteredValue: { stringValue: getUlanganPin() || '1234' } },
+                    { userEnteredValue: { stringValue: getUlanganPin() || '' } },
                     { userEnteredValue: { stringValue: 'PIN / Kode Akses Guru & PIN Ulangan Global' } },
                     { userEnteredValue: { stringValue: new Date().toLocaleString('id-ID') } },
                   ],
@@ -262,7 +264,7 @@ export async function createNewSpreadsheet(accessToken: string): Promise<string>
                   values: [
                     { userEnteredValue: { stringValue: id } },
                     { userEnteredValue: { stringValue: name } },
-                    { userEnteredValue: { stringValue: '1234' } },
+                    { userEnteredValue: { stringValue: '' } },
                     { userEnteredValue: { stringValue: 'Aktif' } },
                     { userEnteredValue: { stringValue: new Date().toLocaleString('id-ID') } },
                   ]
