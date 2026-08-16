@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import confetti from 'canvas-confetti';
-import { KeyRound, Lock, ShieldAlert, ArrowLeft, CheckCircle2 } from 'lucide-react';
+import { KeyRound, Lock, ShieldAlert, ShieldCheck, ArrowLeft, CheckCircle2, AlertTriangle, EyeOff, CameraOff } from 'lucide-react';
 import { db, collection, addDoc } from '../lib/firebase';
 import { useAuth } from '../lib/AuthContext';
 import { appendScoreToSheet, getUlanganPin, getGuruPin, getScriptUrl, setScriptUrl, getTopicPinsFromStorage, setTopicPinInStorage } from '../lib/sheets';
@@ -83,6 +83,31 @@ export default function Ulangan() {
   const [isSaving, setIsSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState<string>('');
   const [scoreInfo, setScoreInfo] = useState({ pg: 0, isian: 0, total: 0 });
+
+  // Anti-Cheat States
+  const [violationCount, setViolationCount] = useState<number>(0);
+  const [warningToast, setWarningToast] = useState<string | null>(null);
+  const [isScreenConcealed, setIsScreenConcealed] = useState<boolean>(false);
+  const [showViolationModal, setShowViolationModal] = useState<boolean>(false);
+  const [lastViolationType, setLastViolationType] = useState<string>('');
+  const toastTimeoutRef = useRef<any>(null);
+
+  const showAntiCheatToast = useCallback((msg: string) => {
+    setWarningToast(msg);
+    if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
+    toastTimeoutRef.current = setTimeout(() => {
+      setWarningToast(null);
+    }, 3500);
+  }, []);
+
+  const handleTriggerViolation = useCallback((type: 'tab_switch' | 'screenshot' | 'devtools' | 'copy_paste', desc: string) => {
+    setViolationCount(prev => prev + 1);
+    setLastViolationType(desc);
+    showAntiCheatToast(`🛡️ ${desc}`);
+    if (type === 'tab_switch' || type === 'screenshot') {
+      setShowViolationModal(true);
+    }
+  }, [showAntiCheatToast]);
 
   const quizQuestions = (customQuestions && customQuestions.length > 0) ? customQuestions : defaultPresetQuestions;
 
@@ -186,6 +211,141 @@ export default function Ulangan() {
         .catch(err => console.warn('Gagal pre-fetch topic PINs:', err));
     }
   }, [user, topicId]);
+
+  // Anti-Cheating Event Listeners (Active only during the exam before submit)
+  useEffect(() => {
+    if (!isUnlocked || submitted) return;
+
+    // 1. Block Context Menu (Right Click)
+    const handleContextMenu = (e: MouseEvent) => {
+      e.preventDefault();
+      handleTriggerViolation('copy_paste', 'Klik kanan dinonaktifkan demi integritas ulangan.');
+    };
+
+    // 2. Block Copy & Cut
+    const handleCopy = (e: ClipboardEvent) => {
+      e.preventDefault();
+      handleTriggerViolation('copy_paste', 'Dilarang menyalin (Copy) teks soal ulangan!');
+    };
+
+    const handleCut = (e: ClipboardEvent) => {
+      e.preventDefault();
+      handleTriggerViolation('copy_paste', 'Dilarang memotong (Cut) teks dari lembar ulangan!');
+    };
+
+    // 3. Block Paste into exam inputs
+    const handlePaste = (e: ClipboardEvent) => {
+      e.preventDefault();
+      handleTriggerViolation('copy_paste', 'Dilarang menempel (Paste) jawaban dari luar! Ketik secara mandiri.');
+    };
+
+    // 4. Block Drag & Selection on text elements
+    const handleSelectStart = (e: Event) => {
+      const target = e.target as HTMLElement;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) {
+        return; // Allow selecting text inside own input
+      }
+      e.preventDefault();
+    };
+
+    // 5. Detect Keyboard Shortcuts (Screenshot, DevTools, Copy, Print, View Source)
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // PrintScreen / Screenshot keys
+      if (e.key === 'PrintScreen' || e.code === 'PrintScreen' || e.keyCode === 44) {
+        e.preventDefault();
+        try {
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText('');
+          }
+        } catch {
+          // ignore
+        }
+        setIsScreenConcealed(true);
+        handleTriggerViolation('screenshot', 'Tangkapan layar (PrintScreen / Screenshot) terdeteksi & diblokir!');
+        return;
+      }
+
+      // Windows Snipping tool (Win + Shift + S) or Mac Screenshot (Cmd + Shift + 3/4/5)
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && ['S', 's', '3', '4', '5'].includes(e.key)) {
+        e.preventDefault();
+        setIsScreenConcealed(true);
+        handleTriggerViolation('screenshot', 'Kombinasi tombol tangkapan layar (Snipping Tool) terdeteksi!');
+        return;
+      }
+
+      // Ctrl/Cmd + C, V, X, P, U, S
+      if ((e.ctrlKey || e.metaKey) && ['c', 'C', 'v', 'V', 'x', 'X', 'p', 'P', 'u', 'U', 's', 'S'].includes(e.key)) {
+        const target = e.target as HTMLElement;
+        const isInput = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA');
+        
+        // Allow select all or standard editing inside input if not copy/paste
+        if (isInput && (e.key === 'a' || e.key === 'A' || e.key === 'z' || e.key === 'Z')) {
+          return;
+        }
+
+        e.preventDefault();
+        handleTriggerViolation('copy_paste', `Pintasan tombol (Ctrl/Cmd + ${e.key.toUpperCase()}) dinonaktifkan saat ulangan.`);
+        return;
+      }
+
+      // Developer Tools (F12 or Ctrl+Shift+I/J/C)
+      if (
+        e.key === 'F12' || 
+        ((e.ctrlKey || e.metaKey) && e.shiftKey && ['I', 'i', 'J', 'j', 'C', 'c'].includes(e.key))
+      ) {
+        e.preventDefault();
+        handleTriggerViolation('devtools', 'Akses Developer Tools / Inspeksi Soal diblokir!');
+        return;
+      }
+    };
+
+    // 6. Tab Switching / Window Blur Detection
+    const handleVisibilityChange = () => {
+      if (document.hidden || document.visibilityState === 'hidden') {
+        setIsScreenConcealed(true);
+        handleTriggerViolation('tab_switch', 'Terdeteksi berpindah tab / meninggalkan jendela ulangan!');
+      }
+    };
+
+    const handleWindowBlur = () => {
+      setIsScreenConcealed(true);
+    };
+
+    const handleWindowFocus = () => {
+      // Screen stays concealed until modal acknowledged
+    };
+
+    // 7. Warn before leaving page
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = 'Ulangan sedang berlangsung. Jika Anda keluar, jawaban yang belum tersimpan akan hilang!';
+      return e.returnValue;
+    };
+
+    window.addEventListener('contextmenu', handleContextMenu);
+    window.addEventListener('copy', handleCopy);
+    window.addEventListener('cut', handleCut);
+    window.addEventListener('paste', handlePaste);
+    window.addEventListener('selectstart', handleSelectStart);
+    window.addEventListener('keydown', handleKeyDown);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('blur', handleWindowBlur);
+    window.addEventListener('focus', handleWindowFocus);
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
+    return () => {
+      window.removeEventListener('contextmenu', handleContextMenu);
+      window.removeEventListener('copy', handleCopy);
+      window.removeEventListener('cut', handleCut);
+      window.removeEventListener('paste', handlePaste);
+      window.removeEventListener('selectstart', handleSelectStart);
+      window.removeEventListener('keydown', handleKeyDown);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('blur', handleWindowBlur);
+      window.removeEventListener('focus', handleWindowFocus);
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, [isUnlocked, submitted, handleTriggerViolation]);
 
   const handleVerifyPin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -377,6 +537,7 @@ export default function Ulangan() {
           score: total,
           correctPilihan: pg,
           correctIsian: isian,
+          tabSwitches: violationCount,
           createdAt: new Date().toISOString(),
         });
       } catch (fsErr) {
@@ -503,7 +664,59 @@ export default function Ulangan() {
   }
 
   return (
-    <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 max-w-4xl mx-auto">
+    <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 max-w-4xl mx-auto select-none relative">
+      
+      {/* Toast Notifikasi Anti-Curang */}
+      {warningToast && (
+        <div className="fixed top-5 left-1/2 -translate-x-1/2 z-50 animate-in fade-in slide-in-from-top-4 duration-300">
+          <div className="bg-rose-900 text-white px-5 py-3 rounded-2xl shadow-2xl border-2 border-rose-400 flex items-center gap-3 text-xs md:text-sm font-bold tracking-wide backdrop-blur-md">
+            <ShieldAlert className="w-5 h-5 text-rose-300 animate-pulse flex-shrink-0" />
+            <span>{warningToast}</span>
+          </div>
+        </div>
+      )}
+
+      {/* Modal / Shield Penyamaran saat Pindah Tab atau Screenshot Terdeteksi */}
+      {isScreenConcealed && !submitted && (
+        <div className="fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-2xl flex items-center justify-center p-4">
+          <div className="bg-slate-900 border-2 border-rose-500/80 rounded-3xl p-6 md:p-8 max-w-lg w-full text-center shadow-2xl animate-in zoom-in-95 duration-200">
+            <div className="w-16 h-16 bg-rose-950/80 border border-rose-500/50 rounded-2xl flex items-center justify-center mx-auto mb-4 text-rose-400">
+              <EyeOff className="w-8 h-8 animate-pulse" />
+            </div>
+            <h2 className="text-lg md:text-xl font-black text-white tracking-tight mb-2">
+              ⚠️ Layar Ujian Disamarkan
+            </h2>
+            <p className="text-xs md:text-sm text-rose-200 font-medium mb-4">
+              {lastViolationType || 'Terdeteksi meninggalkan jendela ujian, membuka tab/aplikasi lain, atau mencoba tangkapan layar.'}
+            </p>
+            <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-4 mb-6 text-left space-y-2">
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-slate-400 font-medium">Siswa:</span>
+                <span className="font-bold text-white">{user?.fullName || 'Siswa'}</span>
+              </div>
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-slate-400 font-medium">Status Pengawasan:</span>
+                <span className="font-bold text-rose-400">Tercatat ({violationCount}x Peringatan)</span>
+              </div>
+              <p className="text-[11px] text-slate-400 border-t border-slate-800/80 pt-2 leading-relaxed">
+                Segala aktivitas membuka tab/aplikasi AI dan tangkapan layar dipantau oleh sistem demi kejujuran akademik.
+              </p>
+            </div>
+            <button
+              onClick={() => {
+                setIsScreenConcealed(false);
+                setShowViolationModal(false);
+              }}
+              className="w-full py-3.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-sm font-bold transition-colors shadow-lg shadow-rose-900/50 flex items-center justify-center gap-2"
+            >
+              <ShieldCheck className="w-4 h-4" />
+              <span>Saya Mengerti & Lanjutkan Ujian</span>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Header Halaman */}
       <div className="mb-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 className="text-xl md:text-2xl font-bold text-slate-800 tracking-tight flex items-center gap-2">
@@ -521,6 +734,47 @@ export default function Ulangan() {
           </p>
         </div>
       </div>
+
+      {/* Bar Keamanan Anti-Curang (Security Bar) */}
+      {!submitted && (
+        <div className="mb-6 bg-indigo-50/70 border border-indigo-200/80 rounded-2xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-xl bg-indigo-600 text-white flex items-center justify-center flex-shrink-0 shadow-sm">
+              <ShieldCheck className="w-4.5 h-4.5" />
+            </div>
+            <div>
+              <p className="font-bold text-indigo-950 flex items-center gap-1.5">
+                <span>Mode Ujian Terproteksi (Anti-Curang Aktif)</span>
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping inline-block" />
+              </p>
+              <p className="text-slate-500 text-[11px] mt-0.5">
+                Copy/Paste diblokir • Screenshot/AI dilarang • Deteksi pindah tab aktif
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 self-start md:self-auto">
+            <span className={`px-2.5 py-1 rounded-lg font-bold text-[11px] flex items-center gap-1 border ${
+              violationCount === 0 
+                ? 'bg-emerald-100/80 text-emerald-800 border-emerald-200' 
+                : 'bg-amber-100 text-amber-800 border-amber-300 animate-pulse'
+            }`}>
+              <AlertTriangle className="w-3 h-3" />
+              <span>{violationCount === 0 ? '0 Pelanggaran' : `${violationCount}x Peringatan`}</span>
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* Watermark Pencegah Foto Layar */}
+      {!submitted && (
+        <div className="pointer-events-none fixed inset-0 z-0 overflow-hidden flex flex-wrap gap-16 p-8 items-center justify-around opacity-[0.025] select-none">
+          {Array.from({ length: 16 }).map((_, i) => (
+            <div key={i} className="text-xs font-mono font-black rotate-[-25deg] uppercase">
+              {user?.fullName || 'MathFun Siswa'} • {user?.email || 'Ujian'} • PROTECTED
+            </div>
+          ))}
+        </div>
+      )}
 
       {submitted && (
         <div className="bg-indigo-900 border border-indigo-800 text-white rounded-xl p-6 md:p-8 mb-8 text-center shadow-lg animate-in zoom-in-95 duration-500 relative overflow-hidden">
