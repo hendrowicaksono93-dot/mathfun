@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { topics } from '../lib/topics';
+import { BRKonsepContent, BRKonversiContent, BROperasiContent, BRPenerapanContent } from '../components/MateriBilanganRasional';
 
 // Reusing lucide-react icons
 import { Puzzle, PenTool, Brackets, Calculator, Variable, Scaling, ThermometerSnowflake, Waves, ArrowRight, ArrowLeft } from 'lucide-react';
@@ -8,6 +9,13 @@ import { Puzzle, PenTool, Brackets, Calculator, Variable, Scaling, ThermometerSn
 export default function Materi() {
   const { topicId } = useParams();
   const currentTopic = topics.find(t => t.id === topicId) || topics[0];
+
+  const bilanganRasionalTabs = [
+    { id: 'konsep-rasional', label: 'Konsep & Bentuk Rasional' },
+    { id: 'konversi-rasional', label: 'Konversi Pecahan, Desimal & %' },
+    { id: 'operasi-hitung-rasional', label: 'Operasi Hitung & Contoh Soal' },
+    { id: 'penerapan-rasional', label: 'Penerapan Soal Cerita' }
+  ];
 
   const aljabarTabs = [
     { id: 'pengertian', label: 'Unsur Aljabar' },
@@ -149,6 +157,7 @@ export default function Materi() {
   let desc = "Mengenal konsep dasar matematika";
 
   switch(currentTopic.id) {
+    case 'bilangan-rasional': tabs = bilanganRasionalTabs; desc = "Konsep pecahan, desimal, persen, dan operasi hitung pecahan dengan contoh soal"; break;
     case 'aljabar': tabs = aljabarTabs; desc = "Konsep dasar, unsur-unsur, susunan, dan operasi hitung"; break;
     case 'plsv-ptlsv': tabs = plsvTabs; desc = "Memahami keseimbangan persamaan dan pertidaksamaan"; break;
     case 'aritmatika-sosial': tabs = aritmatikaSosialTabs; desc = "Penerapan matematika dalam kegiatan ekonomi sehari-hari"; break;
@@ -209,6 +218,11 @@ export default function Materi() {
 
         {/* Content Area */}
         <div className="p-6 md:p-8">
+          {activeTab === 'konsep-rasional' && <BRKonsepContent />}
+          {activeTab === 'konversi-rasional' && <BRKonversiContent />}
+          {activeTab === 'operasi-hitung-rasional' && <BROperasiContent />}
+          {activeTab === 'penerapan-rasional' && <BRPenerapanContent />}
+
           {activeTab === 'pengertian' && <PengertianContent />}
           {activeTab === 'sifat' && <SifatContent />}
           {activeTab === 'operasi' && <OperasiContent />}

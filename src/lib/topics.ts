@@ -2,11 +2,12 @@ import {
   Calculator, Superscript, Scale, ShoppingCart, Percent, 
   Triangle, Shapes, PieChart, Focus, Layers, 
   Share2, TrendingUp, Box, ListOrdered, Circle, 
-  GripHorizontal, Maximize, Cylinder, Move3D, Dices, TriangleRight
+  GripHorizontal, Maximize, Cylinder, Move3D, Dices, TriangleRight, Divide
 } from 'lucide-react';
 
 export const topics = [
   { id: 'bilangan-bulat', name: 'Bilangan Bulat', icon: Calculator, color: 'bg-blue-500', isReady: true },
+  { id: 'bilangan-rasional', name: 'Bilangan Rasional', icon: Divide, color: 'bg-emerald-600', isReady: true },
   { id: 'aljabar', name: 'Aljabar', icon: Superscript, color: 'bg-indigo-500', isReady: true },
   { id: 'plsv-ptlsv', name: 'Persamaan & Pertidaksamaan Linear Satu Variabel', icon: Scale, color: 'bg-violet-500', isReady: true },
   { id: 'aritmatika-sosial', name: 'Aritmatika Sosial', icon: ShoppingCart, color: 'bg-emerald-500', isReady: true },

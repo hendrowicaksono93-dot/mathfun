@@ -1,3 +1,126 @@
+export const bilanganRasionalQuestions = [
+  {
+    id: 'q1',
+    type: 'pg',
+    question: 'Manakah pernyataan yang paling tepat mengenai pengertian bilangan rasional?',
+    options: [
+      'Bilangan yang dapat dinyatakan dalam bentuk a/b dengan a, b bulat dan b ≠ 0',
+      'Bilangan yang tidak dapat dinyatakan dalam bentuk pecahan',
+      'Bilangan bulat positif saja yang lebih besar dari nol',
+      'Bilangan desimal tak berhingga dan tak berulang seperti π'
+    ],
+    answer: 'Bilangan yang dapat dinyatakan dalam bentuk a/b dengan a, b bulat dan b ≠ 0',
+    difficulty: 'Mudah'
+  },
+  {
+    id: 'q2',
+    type: 'pg',
+    question: 'Bentuk desimal dari pecahan 3/5 adalah...',
+    options: ['0,6', '0,35', '0,53', '0,65'],
+    answer: '0,6',
+    difficulty: 'Mudah'
+  },
+  {
+    id: 'q3',
+    type: 'pg',
+    question: 'Bentuk pecahan biasa paling sederhana dari 45% adalah...',
+    options: ['9/20', '4/5', '45/100', '9/25'],
+    answer: '9/20',
+    difficulty: 'Mudah'
+  },
+  {
+    id: 'q4',
+    type: 'pg',
+    question: 'Bentuk pecahan paling sederhana dari bilangan desimal 0,375 adalah...',
+    options: ['3/8', '3/4', '7/16', '375/100'],
+    answer: '3/8',
+    difficulty: 'Sedang'
+  },
+  {
+    id: 'q5',
+    type: 'pg',
+    question: 'Hasil penjumlahan pecahan 2/3 + 1/4 adalah...',
+    options: ['11/12', '3/7', '7/12', '8/12'],
+    answer: '11/12',
+    difficulty: 'Sedang'
+  },
+  {
+    id: 'q6',
+    type: 'pg',
+    question: 'Hasil pengurangan pecahan 5/6 - 3/8 adalah...',
+    options: ['11/24', '2/2', '1/12', '7/24'],
+    answer: '11/24',
+    difficulty: 'Sedang'
+  },
+  {
+    id: 'q7',
+    type: 'pg',
+    question: 'Hasil dari perkalian pecahan 3/4 × 8/9 adalah...',
+    options: ['2/3', '24/36', '1/3', '3/4'],
+    answer: '2/3',
+    difficulty: 'Sedang'
+  },
+  {
+    id: 'q8',
+    type: 'pg',
+    question: 'Hasil pembagian pecahan 4/7 ÷ 8/21 adalah...',
+    options: ['3/2', '2/3', '32/147', '4/3'],
+    answer: '3/2',
+    difficulty: 'Sedang'
+  },
+  {
+    id: 'q9',
+    type: 'pg',
+    question: 'Hasil dari operasi campuran 1/2 + 3/4 × 2/3 - 1/6 adalah...',
+    options: ['5/6', '2/3', '1', '7/12'],
+    answer: '5/6',
+    difficulty: 'Sulit'
+  },
+  {
+    id: 'q10',
+    type: 'pg',
+    question: 'Ibu memiliki persediaan tepung terigu sebanyak 2 1/2 kg. Kemudian digunakan untuk membuat bolu sebanyak 1 1/4 kg. Jika Ibu membeli lagi 0,75 kg tepung, banyak tepung terigu Ibu sekarang adalah...',
+    options: ['2 kg', '1,75 kg', '2,25 kg', '2,5 kg'],
+    answer: '2 kg',
+    difficulty: 'Sulit'
+  },
+  {
+    id: 'q11',
+    type: 'isian',
+    question: 'Bentuk persen dari pecahan 7/20 adalah ... % (tulis hanya angka)',
+    answer: '35',
+    difficulty: 'Mudah'
+  },
+  {
+    id: 'q12',
+    type: 'isian',
+    question: 'Bentuk pecahan biasa paling sederhana dari 0,64 adalah a/b. Tulis jawaban dalam format a/b (contoh: 16/25)',
+    answer: '16/25',
+    difficulty: 'Sedang'
+  },
+  {
+    id: 'q13',
+    type: 'isian',
+    question: 'Hasil dari 3/4 + 5/6 dalam bentuk pecahan biasa paling sederhana adalah a/b (contoh: 19/12)',
+    answer: '19/12',
+    difficulty: 'Sedang'
+  },
+  {
+    id: 'q14',
+    type: 'isian',
+    question: 'Hasil dari 5/8 × 4/15 dalam pecahan paling sederhana adalah a/b (contoh: 1/6)',
+    answer: '1/6',
+    difficulty: 'Sedang'
+  },
+  {
+    id: 'q15',
+    type: 'isian',
+    question: 'Hasil dari 7/10 ÷ 14/15 dalam bentuk pecahan biasa paling sederhana adalah a/b (contoh: 3/4)',
+    answer: '3/4',
+    difficulty: 'Sulit'
+  }
+];
+
 export const aljabarQuestions = [
   {
     id: 'q1',

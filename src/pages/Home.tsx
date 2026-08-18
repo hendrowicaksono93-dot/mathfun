@@ -82,6 +82,7 @@ function setup() {
 
     var daftarMateri = [
       ["bilangan-bulat", "Bilangan Bulat", "1234", "Aktif"],
+      ["bilangan-rasional", "Bilangan Rasional", "1234", "Aktif"],
       ["aljabar", "Aljabar", "1234", "Aktif"],
       ["plsv-ptlsv", "Persamaan & Pertidaksamaan Linear Satu Variabel", "1234", "Aktif"],
       ["aritmatika-sosial", "Aritmatika Sosial", "1234", "Aktif"],

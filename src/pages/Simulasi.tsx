@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom';
 import { topics } from '../lib/topics';
 import { Dice6 } from 'lucide-react';
 import { motion } from 'motion/react';
+import { SimulasiBilanganRasional } from '../components/SimulasiBilanganRasional';
 
 export default function Simulasi() {
   const { topicId } = useParams();
@@ -12,6 +13,10 @@ export default function Simulasi() {
   let SimulasiComponent = SimulasiBilanganBulat;
 
   switch(currentTopic.id) {
+    case 'bilangan-rasional':
+      desc = "Visualisasikan operasi hitung pecahan (+, -, ×, ÷) dengan model petak persegi dan simulator konversi 100 petak.";
+      SimulasiComponent = SimulasiBilanganRasional;
+      break;
     case 'aljabar':
       desc = "Gunakan mesin canggih ini untuk memvisualisasikan bagaimana nilai huruf digantikan dengan angka.";
       SimulasiComponent = SimulasiAljabar;

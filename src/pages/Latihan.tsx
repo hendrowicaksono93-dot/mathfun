@@ -18,6 +18,15 @@ const bilanganBulatLatihan = [
   { p: 'Hasil pembagian -15 ÷ 3 adalah?', j: '-5', c: 'Negatif dibagi positif hasilnya negatif.' },
 ];
 
+const bilanganRasionalLatihan = [
+  { p: 'Apa syarat bilangan rasional a/b?', j: 'a dan b bilangan bulat, serta b ≠ 0', c: 'Penyebut tidak boleh sama dengan 0 karena pembagian dengan nol tidak terdefinisi.' },
+  { p: 'Berapakah bentuk desimal dari 3/4?', j: '0,75', c: '3 ÷ 4 = 0,75 atau (3 × 25)/(4 × 25) = 75/100 = 0,75.' },
+  { p: 'Ubah 0,6 menjadi persen!', j: '60%', c: '0,6 × 100% = 60%.' },
+  { p: 'Hitunglah: 1/2 + 1/3 = ...', j: '5/6', c: 'Samakan penyebut dengan KPK 6: 3/6 + 2/6 = 5/6.' },
+  { p: 'Hitunglah: 2/3 × 3/4 = ...', j: '1/2 (atau 6/12)', c: 'Kalikan pembilang dengan pembilang, penyebut dengan penyebut: (2 × 3)/(3 × 4) = 6/12 = 1/2.' },
+  { p: 'Hitunglah: 3/5 ÷ 2/5 = ...', j: '3/2 (atau 1 1/2)', c: 'Balik pecahan kedua dan kalikan: 3/5 × 5/2 = 15/10 = 3/2.' }
+];
+
 const plsvLatihan = [
   { p: 'Manakah yang merupakan Persamaan Linear Satu Variabel: 2x + 4 = 8 atau x² + 2 = 6?', j: '2x + 4 = 8', c: 'PLSV hanya memiliki 1 variabel (x) dangan pangkat tertingginya 1. x² pangkatnya 2.' },
   { p: 'Selesaikan persamaan: 3x - 5 = 7', j: 'x = 4', c: '-5 pindah ke kanan menjadi +5. 3x = 12. x = 12 ÷ 3 = 4.' },
@@ -168,6 +177,7 @@ export default function Latihan() {
   
   let latihanData = bilanganBulatLatihan;
   switch (currentTopic.id) {
+    case 'bilangan-rasional': latihanData = bilanganRasionalLatihan; break;
     case 'aljabar': latihanData = aljabarLatihan; break;
     case 'plsv-ptlsv': latihanData = plsvLatihan; break;
     case 'aritmatika-sosial': latihanData = aritmatikaSosialLatihan; break;

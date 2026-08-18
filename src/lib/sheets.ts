@@ -242,6 +242,7 @@ export async function createNewSpreadsheet(accessToken: string): Promise<string>
                 },
                 ...[
                   ['bilangan-bulat', 'Bilangan Bulat'],
+                  ['bilangan-rasional', 'Bilangan Rasional'],
                   ['aljabar', 'Aljabar'],
                   ['plsv-ptlsv', 'Persamaan & Pertidaksamaan Linear Satu Variabel'],
                   ['aritmatika-sosial', 'Aritmatika Sosial'],

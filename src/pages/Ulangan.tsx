@@ -16,6 +16,7 @@ import {
 import { 
   aljabarQuestions, 
   bilanganBulatQuestions, 
+  bilanganRasionalQuestions,
   plsvQuestions, 
   aritmatikaSosialQuestions, 
   perbandinganQuestions, 
@@ -45,6 +46,7 @@ export default function Ulangan() {
   
   let defaultPresetQuestions = bilanganBulatQuestions;
   switch (currentTopic.id) {
+    case 'bilangan-rasional': defaultPresetQuestions = bilanganRasionalQuestions; break;
     case 'aljabar': defaultPresetQuestions = aljabarQuestions; break;
     case 'plsv-ptlsv': defaultPresetQuestions = plsvQuestions; break;
     case 'aritmatika-sosial': defaultPresetQuestions = aritmatikaSosialQuestions; break;
