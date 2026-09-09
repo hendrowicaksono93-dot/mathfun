@@ -9,6 +9,25 @@ export interface QuestionItem {
   answer: string;
   difficulty?: 'Mudah' | 'Sedang' | 'Sulit';
   score?: number;
+  image?: string;
+  imageUrl?: string;
+}
+
+/**
+ * Format image URLs especially from Google Drive share links
+ * e.g. https://drive.google.com/file/d/FILE_ID/view -> direct image thumbnail
+ */
+export function formatQuestionImageUrl(url?: string): string {
+  if (!url) return '';
+  const clean = url.trim();
+  if (!clean) return '';
+
+  // Google Drive URL converter
+  const gdMatch = clean.match(/(?:drive\.google\.com\/(?:file\/d\/|open\?id=)|lh3\.googleusercontent\.com\/d\/)([a-zA-Z0-9_-]+)/);
+  if (gdMatch && gdMatch[1]) {
+    return `https://drive.google.com/thumbnail?id=${gdMatch[1]}&sz=w1000`;
+  }
+  return clean;
 }
 
 export interface TopicBankSoal {

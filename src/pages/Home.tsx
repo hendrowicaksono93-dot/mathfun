@@ -115,9 +115,14 @@ function setup() {
   var sheetBank = ss.getSheetByName("Bank Soal");
   if (!sheetBank) { sheetBank = ss.insertSheet("Bank Soal"); }
   if (sheetBank.getLastRow() === 0) {
-    sheetBank.appendRow(["ID Materi", "Tipe (pg/isian)", "ID Soal", "Pertanyaan", "Opsi A", "Opsi B", "Opsi C", "Opsi D", "Kunci Jawaban", "Kesulitan", "Skor"]);
-    sheetBank.getRange(1, 1, 1, 11).setFontWeight("bold").setBackground("#f3e8ff").setFontColor("#6b21a8");
+    sheetBank.appendRow(["ID Materi", "Tipe (pg/isian)", "ID Soal", "Pertanyaan", "Opsi A", "Opsi B", "Opsi C", "Opsi D", "Kunci Jawaban", "Kesulitan", "Skor", "Link Gambar (Opsional)"]);
+    sheetBank.getRange(1, 1, 1, 12).setFontWeight("bold").setBackground("#f3e8ff").setFontColor("#6b21a8");
     sheetBank.setFrozenRows(1);
+  } else {
+    var headerCols = sheetBank.getLastColumn();
+    if (headerCols < 12) {
+      sheetBank.getRange(1, 12).setValue("Link Gambar (Opsional)").setFontWeight("bold").setBackground("#f3e8ff").setFontColor("#6b21a8");
+    }
   }
 
   Logger.log("✅ Setup berhasil!");
@@ -258,6 +263,7 @@ function doGet(e) {
           var rawAnswer = row[8] !== undefined && row[8] !== null ? row[8].toString().trim() : "";
           var difficulty = row[9] ? row[9].toString().trim() : "Sedang";
           var score = row[10] ? Number(row[10]) || 10 : 10;
+          var rawImage = row[11] !== undefined && row[11] !== null ? row[11].toString().trim() : "";
 
           var options = type === "pg" ? [opsiA, opsiB, opsiC, opsiD] : [];
           var answer = rawAnswer;
@@ -283,6 +289,16 @@ function doGet(e) {
           };
 
           if (type === "pg") { qObj.options = options; }
+
+          if (rawImage) {
+            // Auto convert Google Drive links to direct thumbnail image URLs
+            var gdMatch = rawImage.match(/(?:drive\.google\.com\/(?:file\/d\/|open\?id=)|lh3\.googleusercontent\.com\/d\/)([a-zA-Z0-9_-]+)/);
+            if (gdMatch && gdMatch[1]) {
+              qObj.image = "https://drive.google.com/thumbnail?id=" + gdMatch[1] + "&sz=w1000";
+            } else {
+              qObj.image = rawImage;
+            }
+          }
 
           bankSoal[topicId].push(qObj);
         }
@@ -878,7 +894,53 @@ export default function Home() {
                       />
                     </div>
 
-                    {authError && <p className="text-red-600 text-xs font-medium bg-red-50 p-3 rounded-xl border border-red-200">⚠️ {authError}</p>}
+                    {authError && (
+                      <div className="text-xs bg-amber-50 p-3.5 rounded-xl border border-amber-200 text-amber-900 space-y-2">
+                        <div className="flex items-start gap-2">
+                          <span className="text-base leading-none">⚠️</span>
+                          <div className="flex-1 leading-relaxed font-medium">
+                            {authError}
+                          </div>
+                        </div>
+
+                        {/* If unauthorized domain on Google Sign-in */}
+                        {authError.includes('Firebase Console') && (
+                          <div className="pt-1.5 border-t border-amber-200/60 flex items-center justify-between gap-2">
+                            <span className="text-[11px] text-amber-700 font-mono truncate">
+                              Domain: {typeof window !== 'undefined' ? window.location.hostname : ''}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (typeof window !== 'undefined') {
+                                  navigator.clipboard.writeText(window.location.hostname);
+                                  alert(`Domain ${window.location.hostname} telah disalin!`);
+                                }
+                              }}
+                              className="px-2 py-1 bg-amber-200/80 hover:bg-amber-300 rounded text-[10px] font-bold text-amber-900 transition-colors flex-shrink-0"
+                            >
+                              Salin Domain
+                            </button>
+                          </div>
+                        )}
+
+                        {/* If user not found / wrong password during Sign In */}
+                        {!isRegister && (authError.includes('belum pernah mendaftar') || authError.includes('tidak cocok') || authError.includes('Daftar di sini')) && (
+                          <div className="pt-1">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setIsRegister(true);
+                                setAuthError('');
+                              }}
+                              className="w-full py-1.5 px-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold transition-colors shadow-sm text-center"
+                            >
+                              ✨ Buat Akun Baru dengan Email Ini
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )}
 
                     <button 
                       type="submit" 

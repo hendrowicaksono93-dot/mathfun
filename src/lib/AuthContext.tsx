@@ -161,8 +161,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } catch (err: any) {
       console.error('Sign Up Firebase Error:', err);
 
-      // If Firebase Auth provider is disabled or operation not allowed, seamlessly use resilient cloud/local registration
-      if (err.code === 'auth/operation-not-allowed' || err.code === 'auth/admin-restricted-operation') {
+      // If already registered, attempt sign-in automatically
+      if (err.code === 'auth/email-already-in-use') {
+        try {
+          const signInRes = await signInWithEmailAndPassword(auth, cleanEmail, password);
+          const uid = signInRes.user.uid;
+          const activeProfile: UserProfile = { uid, email: cleanEmail, fullName: cleanName };
+          saveLocalAccount(activeProfile, password);
+          setUser(activeProfile);
+          return;
+        } catch (signInErr: any) {
+          throw new Error('Email sudah terdaftar. Silakan masukkan kata sandi yang benar atau klik tab "Masuk di sini".');
+        }
+      }
+
+      // If Firebase Auth provider is disabled or domain restricted, seamlessly use resilient cloud/local registration
+      if (err.code === 'auth/operation-not-allowed' || err.code === 'auth/admin-restricted-operation' || err.code === 'auth/unauthorized-domain') {
         const fallbackUid = 'local_' + Math.random().toString(36).substring(2, 12);
         const profileData = {
           uid: fallbackUid,
@@ -192,9 +206,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
 
       let errMsg = err.message || 'Gagal mendaftar';
-      if (err.code === 'auth/email-already-in-use') {
-        errMsg = 'Email sudah terdaftar. Silakan login.';
-      } else if (err.code === 'auth/weak-password') {
+      if (err.code === 'auth/weak-password') {
         errMsg = 'Password minimal 6 karakter.';
       } else if (err.code === 'auth/invalid-email') {
         errMsg = 'Format email tidak valid.';
@@ -237,28 +249,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } catch (err: any) {
       console.error('Sign In Firebase Error:', err);
 
-      // If Firebase Auth provider is not enabled, fall back to stored/instant login seamlessly
-      if (err.code === 'auth/operation-not-allowed' || err.code === 'auth/admin-restricted-operation') {
-        // Check stored local accounts
-        try {
-          const stored = localStorage.getItem('mathfun_registered_users');
-          if (stored) {
-            const list = JSON.parse(stored);
-            const userEntry = list[cleanEmail];
-            if (userEntry && userEntry.profile) {
-              if (userEntry.pass && userEntry.pass !== password) {
-                throw new Error('Password salah. Silakan periksa kembali kata sandi Anda.');
-              }
-              localStorage.setItem('mathfun_active_user', JSON.stringify(userEntry.profile));
-              setUser(userEntry.profile);
-              return;
+      // Check stored local accounts for fallback
+      try {
+        const stored = localStorage.getItem('mathfun_registered_users');
+        if (stored) {
+          const list = JSON.parse(stored);
+          const userEntry = list[cleanEmail];
+          if (userEntry && userEntry.profile) {
+            if (userEntry.pass && userEntry.pass !== password) {
+              throw new Error('Password salah. Silakan periksa kembali kata sandi Anda.');
             }
+            localStorage.setItem('mathfun_active_user', JSON.stringify(userEntry.profile));
+            setUser(userEntry.profile);
+            return;
           }
-        } catch (storageErr) {
-          console.warn(storageErr);
         }
+      } catch (storageErr) {
+        console.warn(storageErr);
+      }
 
-        // Auto-login as student with this email if password is provided
+      // If Firebase Auth provider is not enabled, fall back to stored/instant login seamlessly
+      if (err.code === 'auth/operation-not-allowed' || err.code === 'auth/admin-restricted-operation' || err.code === 'auth/unauthorized-domain') {
         if (password && password.length >= 3) {
           const fallbackUid = 'local_' + Math.random().toString(36).substring(2, 10);
           const fallbackProfile: UserProfile = {
@@ -274,7 +285,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       let errMsg = err.message || 'Gagal masuk';
       if (err.code === 'auth/invalid-credential' || err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password') {
-        errMsg = 'Email atau password salah. Jika belum punya akun, silakan klik "Daftar di sini".';
+        errMsg = 'Email atau kata sandi tidak cocok. Jika Anda siswa baru dan belum pernah mendaftar, silakan klik tombol "Daftar di sini".';
       } else if (err.code === 'auth/invalid-email') {
         errMsg = 'Format email tidak valid.';
       }
@@ -328,8 +339,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } catch (err: any) {
       console.error('Google Sign In Error:', err);
       let errMsg = err.message || 'Gagal login dengan Google';
-      if (err.code === 'auth/operation-not-allowed') {
-        errMsg = 'Metode login Google belum diaktifkan di Firebase Console. Silakan aktifkan provider Google di Authentication > Sign-in method.';
+      if (err.code === 'auth/unauthorized-domain') {
+        const domain = typeof window !== 'undefined' ? window.location.hostname : 'domain ini';
+        errMsg = `Domain "${domain}" belum diotorisasi di Firebase Console. Anda dapat login langsung menggunakan formulir Email & Kata Sandi di bawah, atau tambahkan domain ini ke Firebase Console > Authentication > Settings > Authorized domains.`;
+      } else if (err.code === 'auth/operation-not-allowed') {
+        errMsg = 'Metode login Google belum diaktifkan di Firebase Console. Silakan aktifkan provider Google di Authentication > Sign-in method atau gunakan pendaftaran Email.';
+      } else if (err.code === 'auth/popup-closed-by-user' || err.code === 'auth/cancelled-popup-request') {
+        errMsg = 'Jendela login Google ditutup sebelum proses selesai. Silakan coba lagi atau gunakan login Email.';
+      } else if (err.code === 'auth/popup-blocked') {
+        errMsg = 'Popup login Google diblokir oleh browser. Izinkan popup untuk situs ini atau gunakan form login Email.';
       }
       throw new Error(errMsg);
     }

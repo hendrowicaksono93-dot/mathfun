@@ -296,6 +296,7 @@ export async function createNewSpreadsheet(accessToken: string): Promise<string>
                     { userEnteredValue: { stringValue: 'Kunci Jawaban' } },
                     { userEnteredValue: { stringValue: 'Kesulitan' } },
                     { userEnteredValue: { stringValue: 'Skor' } },
+                    { userEnteredValue: { stringValue: 'Link Gambar (Opsional)' } },
                   ],
                 },
                 {
@@ -311,6 +312,7 @@ export async function createNewSpreadsheet(accessToken: string): Promise<string>
                     { userEnteredValue: { stringValue: '2a - 9b' } },
                     { userEnteredValue: { stringValue: 'Mudah' } },
                     { userEnteredValue: { stringValue: '10' } },
+                    { userEnteredValue: { stringValue: '' } },
                   ],
                 },
                 {

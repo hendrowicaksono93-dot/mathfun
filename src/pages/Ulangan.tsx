@@ -11,6 +11,7 @@ import {
   getTopicPinsFromFirestore,
   getAppConfigFromFirestore,
   toTopicSlug,
+  formatQuestionImageUrl,
   QuestionItem 
 } from '../lib/bankSoalService';
 import { 
@@ -836,6 +837,16 @@ export default function Ulangan() {
                         <p className="text-sm font-semibold text-slate-800">{q.question}</p>
                         <span className={`text-[10px] px-2 py-1 rounded font-bold uppercase tracking-wider ${q.difficulty === 'Mudah' ? 'bg-emerald-100 text-emerald-700' : q.difficulty === 'Sedang' ? 'bg-amber-100 text-amber-700' : 'bg-rose-100 text-rose-700'}`}>{q.difficulty}</span>
                       </div>
+                      {(q.image || q.imageUrl) && (
+                        <div className="mb-4 overflow-hidden rounded-xl border border-slate-200 bg-white p-2.5 flex flex-col items-center">
+                          <img
+                            src={formatQuestionImageUrl(q.image || q.imageUrl)}
+                            alt={`Gambar Soal ${idx + 1}`}
+                            referrerPolicy="no-referrer"
+                            className="max-h-64 md:max-h-72 w-auto max-w-full object-contain rounded-lg shadow-xs"
+                          />
+                        </div>
+                      )}
                       <div className="grid sm:grid-cols-2 gap-2">
                         {q.options?.map(opt => (
                            <label key={opt} className={`flex items-center px-3 py-2 border rounded-lg cursor-pointer transition-colors ${
@@ -891,6 +902,16 @@ export default function Ulangan() {
                           <p className="text-sm font-semibold text-slate-800">{q.question}</p>
                           <span className={`text-[10px] px-2 py-1 rounded font-bold uppercase tracking-wider ${q.difficulty === 'Mudah' ? 'bg-emerald-100 text-emerald-700' : q.difficulty === 'Sedang' ? 'bg-amber-100 text-amber-700' : 'bg-rose-100 text-rose-700'}`}>{q.difficulty}</span>
                         </div>
+                        {(q.image || q.imageUrl) && (
+                          <div className="mb-4 overflow-hidden rounded-xl border border-slate-200 bg-white p-2.5 flex flex-col items-center">
+                            <img
+                              src={formatQuestionImageUrl(q.image || q.imageUrl)}
+                              alt={`Gambar Soal ${idx + 1}`}
+                              referrerPolicy="no-referrer"
+                              className="max-h-64 md:max-h-72 w-auto max-w-full object-contain rounded-lg shadow-xs"
+                            />
+                          </div>
+                        )}
                         
                         <input
                           type="text"
