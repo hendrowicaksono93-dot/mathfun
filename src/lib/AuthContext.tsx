@@ -159,7 +159,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         console.warn('Sheet sync error:', sheetErr);
       }
     } catch (err: any) {
-      console.error('Sign Up Firebase Error:', err);
+      console.warn('Sign Up Firebase Error (Handled):', err);
 
       // If already registered, attempt sign-in automatically
       if (err.code === 'auth/email-already-in-use') {
@@ -247,7 +247,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       saveLocalAccount(userProfile, password);
       setUser(userProfile);
     } catch (err: any) {
-      console.error('Sign In Firebase Error:', err);
+      console.warn('Sign In Firebase Error (Handled):', err);
 
       // Check stored local accounts for fallback
       try {
@@ -337,7 +337,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         createdAt: new Date().toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' }),
       });
     } catch (err: any) {
-      console.error('Google Sign In Error:', err);
+      console.warn('Google Sign In Error (Handled):', err);
       let errMsg = err.message || 'Gagal login dengan Google';
       if (err.code === 'auth/unauthorized-domain') {
         const domain = typeof window !== 'undefined' ? window.location.hostname : 'domain ini';

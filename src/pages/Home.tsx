@@ -291,13 +291,7 @@ function doGet(e) {
           if (type === "pg") { qObj.options = options; }
 
           if (rawImage) {
-            // Auto convert Google Drive links to direct thumbnail image URLs
-            var gdMatch = rawImage.match(/(?:drive\.google\.com\/(?:file\/d\/|open\?id=)|lh3\.googleusercontent\.com\/d\/)([a-zA-Z0-9_-]+)/);
-            if (gdMatch && gdMatch[1]) {
-              qObj.image = "https://drive.google.com/thumbnail?id=" + gdMatch[1] + "&sz=w1000";
-            } else {
-              qObj.image = rawImage;
-            }
+            qObj.image = rawImage;
           }
 
           bankSoal[topicId].push(qObj);
