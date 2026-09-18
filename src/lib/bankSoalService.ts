@@ -3,7 +3,7 @@ import { getScriptUrl, setAllTopicPinsInStorage, setScriptUrl, setGuruPin, setUl
 
 export interface QuestionItem {
   id: string;
-  type: 'pg' | 'isian';
+  type: 'pg' | 'pg_kompleks' | 'kompleks' | 'isian' | string;
   question: string;
   options?: string[];
   answer: string;
@@ -11,6 +11,139 @@ export interface QuestionItem {
   score?: number;
   image?: string;
   imageUrl?: string;
+}
+
+/**
+ * Resolves a letter (A, B, C, D, E) or exact text to the corresponding option string
+ */
+export function resolveOptionValue(val: string, options: string[] = []): string {
+  const clean = val.trim();
+  const upper = clean.toUpperCase();
+  if (options && options.length > 0) {
+    if (upper === 'A' && options[0] !== undefined) return options[0].trim();
+    if (upper === 'B' && options[1] !== undefined) return options[1].trim();
+    if (upper === 'C' && options[2] !== undefined) return options[2].trim();
+    if (upper === 'D' && options[3] !== undefined) return options[3].trim();
+    if (upper === 'E' && options[4] !== undefined) return options[4].trim();
+
+    // Check if clean matches an option text (case-insensitive)
+    const match = options.find(opt => opt.trim().toLowerCase() === clean.toLowerCase());
+    if (match) return match.trim();
+  }
+  return clean;
+}
+
+/**
+ * Parses correct answers from q.answer into an array of string option values
+ * Supports:
+ * - "A, C" or "A; C" or "A, B, D"
+ * - "Opsi 1; Opsi 2"
+ * - Array of answers
+ */
+export function parseCorrectAnswers(answerStr: string | string[], options: string[] = []): string[] {
+  if (Array.isArray(answerStr)) {
+    return answerStr.map(a => resolveOptionValue(String(a), options)).filter(Boolean);
+  }
+  if (!answerStr) return [];
+  const raw = String(answerStr).trim();
+
+  // 1. Delimiter: semicolon (;) or pipe (|)
+  if (raw.includes(';') || raw.includes('|')) {
+    return raw.split(/[;|]+/)
+      .map(s => s.trim())
+      .filter(Boolean)
+      .map(s => resolveOptionValue(s, options));
+  }
+
+  // 2. Delimiter: " dan " or " & "
+  if (/\s+(?:dan|&)\s+/i.test(raw)) {
+    return raw.split(/\s+(?:dan|&)\s+/i)
+      .map(s => s.trim())
+      .filter(Boolean)
+      .map(s => resolveOptionValue(s, options));
+  }
+
+  // 3. Letters with commas, e.g. "A, C" or "A, B, D" or "A,C"
+  if (/^[A-Ea-e](\s*,\s*[A-Ea-e])+$/.test(raw)) {
+    return raw.split(',')
+      .map(s => s.trim())
+      .filter(Boolean)
+      .map(s => resolveOptionValue(s, options));
+  }
+
+  // 4. Comma separated where each item matches an option or letter
+  if (raw.includes(',') && options.length > 0) {
+    // If the whole string is an exact option (e.g. "0,6" or "1,5"), treat as single answer
+    const exactMatch = options.some(opt => opt.trim().toLowerCase() === raw.toLowerCase());
+    if (!exactMatch) {
+      const parts = raw.split(',').map(s => s.trim()).filter(Boolean);
+      const allPartsValid = parts.every(part => {
+        const u = part.toUpperCase();
+        return (u >= 'A' && u <= 'E') || options.some(opt => opt.trim().toLowerCase() === part.toLowerCase());
+      });
+      if (allPartsValid && parts.length > 1) {
+        return parts.map(s => resolveOptionValue(s, options));
+      }
+    }
+  }
+
+  // Single answer
+  return [resolveOptionValue(raw, options)];
+}
+
+/**
+ * Checks if question is Pilihan Ganda Kompleks (multi-choice)
+ */
+export function isPgKompleksQuestion(q: QuestionItem): boolean {
+  if (q.type === 'pg_kompleks' || (q.type as string) === 'kompleks' || (q.type as string) === 'pgk') {
+    return true;
+  }
+  if (q.type === 'pg') {
+    const correctList = parseCorrectAnswers(q.answer, q.options || []);
+    return correctList.length > 1;
+  }
+  return false;
+}
+
+/**
+ * Evaluates whether user's selected answers match the correct answers
+ */
+export function isQuestionAnswerCorrect(q: QuestionItem, userAnswer: string | string[] | undefined): boolean {
+  if (userAnswer === undefined || userAnswer === null) return false;
+
+  if (q.type === 'isian') {
+    const ans = String(userAnswer).trim().toLowerCase();
+    const correct = String(q.answer).trim().toLowerCase();
+    return ans === correct;
+  }
+
+  const isKompleks = isPgKompleksQuestion(q);
+  const correctList = parseCorrectAnswers(q.answer, q.options || []);
+
+  if (isKompleks) {
+    let userList: string[] = [];
+    if (Array.isArray(userAnswer)) {
+      userList = userAnswer.map(s => s.trim().toLowerCase());
+    } else if (typeof userAnswer === 'string' && userAnswer.trim()) {
+      userList = [userAnswer.trim().toLowerCase()];
+    }
+
+    const normCorrect = correctList.map(s => s.trim().toLowerCase());
+    if (userList.length !== normCorrect.length || normCorrect.length === 0) {
+      return false;
+    }
+
+    // Every item in normCorrect must be in userList, and userList has no extra items
+    const allIncluded = normCorrect.every(c => userList.includes(c));
+    const noExtras = userList.every(u => normCorrect.includes(u));
+    return allIncluded && noExtras;
+  } else {
+    // Single choice PG
+    const singleAns = (Array.isArray(userAnswer) ? userAnswer[0] : userAnswer) || '';
+    const normUser = String(singleAns).trim().toLowerCase();
+    const target = (correctList[0] || String(q.answer)).trim().toLowerCase();
+    return normUser === target;
+  }
 }
 
 /**

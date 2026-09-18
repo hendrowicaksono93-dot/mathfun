@@ -70,18 +70,23 @@ export const bilanganRasionalQuestions = [
   },
   {
     id: 'q9',
-    type: 'pg',
-    question: 'Hasil dari operasi campuran 1/2 + 3/4 × 2/3 - 1/6 adalah...',
-    options: ['5/6', '2/3', '1', '7/12'],
-    answer: '5/6',
-    difficulty: 'Sulit'
+    type: 'pg_kompleks',
+    question: 'Pilihlah bentuk pecahan atau nilai di bawah ini yang senilai dengan 0,6! (Pilih 2 jawaban benar)',
+    options: ['3/5', '60%', '6/100', '2/3'],
+    answer: '3/5; 60%',
+    difficulty: 'Sedang'
   },
   {
     id: 'q10',
-    type: 'pg',
-    question: 'Ibu memiliki persediaan tepung terigu sebanyak 2 1/2 kg. Kemudian digunakan untuk membuat bolu sebanyak 1 1/4 kg. Jika Ibu membeli lagi 0,75 kg tepung, banyak tepung terigu Ibu sekarang adalah...',
-    options: ['2 kg', '1,75 kg', '2,25 kg', '2,5 kg'],
-    answer: '2 kg',
+    type: 'pg_kompleks',
+    question: 'Manakah pernyataan-pernyataan di bawah ini yang bernilai BENAR tentang bilangan rasional? (Pilih 2 jawaban benar)',
+    options: [
+      'Pecahan 1/4 setara dengan 0,25',
+      'Bilangan 3/4 lebih besar daripada 4/5',
+      'Pecahan 2/5 senilai dengan 40%',
+      'Hasil 1/2 + 1/3 adalah 2/5'
+    ],
+    answer: 'Pecahan 1/4 setara dengan 0,25; Pecahan 2/5 senilai dengan 40%',
     difficulty: 'Sulit'
   },
   {
@@ -306,18 +311,28 @@ export const bilanganBulatQuestions = [
   },
   {
     id: 'q9',
-    type: 'pg',
-    question: 'Seekor burung berada pada ketinggian 12 m. Sebuah ikan berada 3 m di bawah permukaan laut. Jarak burung dan ikan tersebut adalah...',
-    options: ['9 m', '15 m', '-15 m', '12 m'],
-    answer: '15 m',
-    difficulty: 'Sulit'
+    type: 'pg_kompleks',
+    question: 'Pilihlah pernyataan-pernyataan di bawah ini yang bernilai BENAR mengenai bilangan bulat! (Pilih 2 jawaban benar)',
+    options: [
+      '-15 lebih kecil daripada -8',
+      'Hasil dari -7 + 10 adalah -3',
+      'Bilangan bulat negatif dikali bilangan negatif menghasilkan bilangan positif',
+      'Hasil dari 12 ÷ (-4) adalah 3'
+    ],
+    answer: '-15 lebih kecil daripada -8; Bilangan bulat negatif dikali bilangan negatif menghasilkan bilangan positif',
+    difficulty: 'Sedang'
   },
   {
     id: 'q10',
-    type: 'pg',
-    question: 'Hasil dari (-5)³ adalah...',
-    options: ['125', '-125', '15', '-15'],
-    answer: '-125',
+    type: 'pg_kompleks',
+    question: 'Manakah operasi hitung berikut yang hasilnya sama dengan 12? (Pilih 2 jawaban benar)',
+    options: [
+      '-3 × (-4)',
+      '20 - (-8)',
+      '-24 ÷ (-2)',
+      '15 + (-7)'
+    ],
+    answer: '-3 × (-4); -24 ÷ (-2)',
     difficulty: 'Sulit'
   },
   {

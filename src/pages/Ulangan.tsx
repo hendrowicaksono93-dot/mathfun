@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import confetti from 'canvas-confetti';
-import { KeyRound, Lock, ShieldAlert, ShieldCheck, ArrowLeft, CheckCircle2, AlertTriangle, EyeOff, CameraOff } from 'lucide-react';
+import { KeyRound, Lock, ShieldAlert, ShieldCheck, ArrowLeft, CheckCircle2, AlertTriangle, EyeOff, CameraOff, Check, CheckSquare, Circle, Square } from 'lucide-react';
 import { db, collection, addDoc } from '../lib/firebase';
 import { useAuth } from '../lib/AuthContext';
 import { appendScoreToSheet, getUlanganPin, getGuruPin, getScriptUrl, setScriptUrl, getTopicPinsFromStorage, setTopicPinInStorage } from '../lib/sheets';
@@ -12,6 +12,9 @@ import {
   getAppConfigFromFirestore,
   toTopicSlug,
   formatQuestionImageUrl,
+  isPgKompleksQuestion,
+  parseCorrectAnswers,
+  isQuestionAnswerCorrect,
   QuestionItem 
 } from '../lib/bankSoalService';
 import { 
@@ -81,7 +84,7 @@ export default function Ulangan() {
   const [isFromFirestore, setIsFromFirestore] = useState<boolean>(false);
   const [loadingQuestions, setLoadingQuestions] = useState<boolean>(true);
 
-  const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [answers, setAnswers] = useState<Record<string, string | string[]>>({});
   const [submitted, setSubmitted] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState<string>('');
@@ -482,6 +485,26 @@ export default function Ulangan() {
     setAnswers(prev => ({ ...prev, [id]: value }));
   };
 
+  const handlePgKompleksToggle = (id: string, value: string) => {
+    if (submitted) return;
+    setAnswers(prev => {
+      const current = prev[id];
+      let list: string[] = [];
+      if (Array.isArray(current)) {
+        list = [...current];
+      } else if (typeof current === 'string' && current.trim()) {
+        list = [current.trim()];
+      }
+
+      if (list.includes(value)) {
+        list = list.filter(item => item !== value);
+      } else {
+        list.push(value);
+      }
+      return { ...prev, [id]: list };
+    });
+  };
+
   const handleIsianChange = (id: string, value: string) => {
     if (submitted) return;
     setAnswers(prev => ({ ...prev, [id]: value }));
@@ -489,7 +512,13 @@ export default function Ulangan() {
 
   const handleSubmit = () => {
     // Determine missing answers
-    const missing = quizQuestions.filter(q => !answers[q.id] || answers[q.id].trim() === '');
+    const missing = quizQuestions.filter(q => {
+      const a = answers[q.id];
+      if (a === undefined || a === null) return true;
+      if (Array.isArray(a)) return a.length === 0;
+      return String(a).trim() === '';
+    });
+
     if (missing.length > 0 && !window.confirm(`Ada ${missing.length} soal yang belum dijawab. Yakin ingin mengumpulkan?`)) {
       return;
     }
@@ -498,16 +527,29 @@ export default function Ulangan() {
     let isianCorrect = 0;
 
     quizQuestions.forEach(q => {
-      if (q.type === 'pg') {
-        if (answers[q.id] === q.answer) pgCorrect++;
-      } else {
+      if (q.type === 'isian') {
         let ans = (answers[q.id] || '').toString().trim().toLowerCase();
         let correct = q.answer.toString().trim().toLowerCase();
         if (ans === correct) isianCorrect++;
+      } else {
+        if (isQuestionAnswerCorrect(q, answers[q.id])) {
+          pgCorrect++;
+        }
       }
     });
 
-    const finalScore = ((pgCorrect * 6) + (isianCorrect * 8));
+    const pgList = quizQuestions.filter(q => q.type !== 'isian');
+    const isianList = quizQuestions.filter(q => q.type === 'isian');
+
+    let finalScore = 0;
+    if (pgList.length === 10 && isianList.length === 5) {
+      finalScore = (pgCorrect * 6) + (isianCorrect * 8);
+    } else {
+      const totalQ = quizQuestions.length;
+      if (totalQ > 0) {
+        finalScore = Math.round(((pgCorrect + isianCorrect) / totalQ) * 100);
+      }
+    }
 
     setScoreInfo({ pg: pgCorrect, isian: isianCorrect, total: finalScore });
     setSubmitted(true);
@@ -788,12 +830,12 @@ export default function Ulangan() {
             
             <div className="grid grid-cols-2 gap-4 max-w-sm mx-auto mb-6 bg-indigo-950/50 border border-indigo-800 p-4 rounded-xl">
                <div>
-                 <p className="text-indigo-300 text-xs uppercase tracking-wider mb-1">Pilihan Ganda</p>
-                 <p className="text-lg font-bold text-white">{scoreInfo.pg} <span className="text-xs font-normal text-indigo-400">/ 10 Benar</span></p>
+                 <p className="text-indigo-300 text-xs uppercase tracking-wider mb-1">Pilihan Ganda / PGK</p>
+                 <p className="text-lg font-bold text-white">{scoreInfo.pg} <span className="text-xs font-normal text-indigo-400">/ {pgQuestions.length} Benar</span></p>
                </div>
                <div>
                  <p className="text-indigo-300 text-xs uppercase tracking-wider mb-1">Isian Singkat</p>
-                 <p className="text-lg font-bold text-white">{scoreInfo.isian} <span className="text-xs font-normal text-indigo-400">/ 5 Benar</span></p>
+                 <p className="text-lg font-bold text-white">{scoreInfo.isian} <span className="text-xs font-normal text-indigo-400">/ {isianQuestions.length} Benar</span></p>
                </div>
             </div>
             
@@ -816,27 +858,72 @@ export default function Ulangan() {
         </div>
       )}
 
-      {/* Bagian A: Pilihan Ganda */}
+      {/* Bagian A: Pilihan Ganda & Pilihan Ganda Kompleks */}
       <div className="mb-8">
-        <div className="bg-slate-50 py-3 px-5 rounded-t-xl border border-slate-200 border-b-0 space-y-1">
-           <h2 className="text-sm font-bold text-slate-800 uppercase tracking-widest">Bagian A: Pilihan Ganda</h2>
+        <div className="bg-slate-50 py-3.5 px-5 rounded-t-xl border border-slate-200 border-b-0 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+           <div>
+             <h2 className="text-sm font-bold text-slate-800 uppercase tracking-widest">
+               Bagian A: Pilihan Ganda & Pilihan Ganda Kompleks
+             </h2>
+             <p className="text-xs text-slate-500 mt-0.5">
+               Tombol bulat (◉) untuk PG Biasa (1 jawaban). Tombol kotak (☑) untuk PG Kompleks (bisa pilih 2 atau lebih).
+             </p>
+           </div>
+           <div className="flex items-center gap-2 text-xs font-semibold">
+             <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-purple-50 text-purple-700 border border-purple-200">
+               <CheckSquare className="w-3.5 h-3.5 text-purple-600" />
+               <span>PG Kompleks</span>
+             </span>
+             <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-slate-100 text-slate-700 border border-slate-200">
+               <Circle className="w-3.5 h-3.5 text-slate-500" />
+               <span>PG Biasa</span>
+             </span>
+           </div>
         </div>
         <div className="bg-white rounded-b-xl p-5 md:p-6 border border-slate-200 shadow-sm space-y-6">
            {pgQuestions.map((q, idx) => {
+             const isKompleks = isPgKompleksQuestion(q);
+             const correctList = parseCorrectAnswers(q.answer, q.options || []);
              const userAnswer = answers[q.id];
-             const isCorrect = userAnswer === q.answer;
+             const userSelectedList = Array.isArray(userAnswer)
+               ? userAnswer
+               : (typeof userAnswer === 'string' && userAnswer.trim() ? [userAnswer.trim()] : []);
+             const isCorrect = submitted && isQuestionAnswerCorrect(q, userAnswer);
 
              return (
-               <div key={q.id} className={`p-4 md:p-5 rounded-xl border transition-all ${submitted ? (isCorrect ? 'bg-emerald-50 border-emerald-200' : 'bg-rose-50 border-rose-200') : 'bg-slate-50 border-slate-200 hover:border-indigo-300'}`}>
+               <div key={q.id} className={`p-4 md:p-5 rounded-xl border transition-all ${
+                 submitted 
+                   ? (isCorrect ? 'bg-emerald-50 border-emerald-200' : 'bg-rose-50 border-rose-200') 
+                   : 'bg-slate-50 border-slate-200 hover:border-indigo-300'
+               }`}>
                  <div className="flex gap-4">
                     <span className="bg-indigo-100 text-indigo-800 text-sm font-bold w-8 h-8 flex items-center justify-center rounded-lg flex-shrink-0">
                       {idx + 1}
                     </span>
                     <div className="flex-1">
-                      <div className="flex justify-between items-start mb-3">
-                        <p className="text-sm font-semibold text-slate-800">{q.question}</p>
-                        <span className={`text-[10px] px-2 py-1 rounded font-bold uppercase tracking-wider ${q.difficulty === 'Mudah' ? 'bg-emerald-100 text-emerald-700' : q.difficulty === 'Sedang' ? 'bg-amber-100 text-amber-700' : 'bg-rose-100 text-rose-700'}`}>{q.difficulty}</span>
+                      {/* Question meta badges */}
+                      <div className="flex items-center gap-2 flex-wrap mb-2">
+                        {isKompleks ? (
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md text-[11px] font-bold bg-purple-100 text-purple-800 border border-purple-200">
+                            <CheckSquare className="w-3.5 h-3.5 text-purple-600" />
+                            <span>Pilihan Ganda Kompleks (Jawaban Benar Lebih dari 1)</span>
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md text-[11px] font-medium bg-slate-100 text-slate-700 border border-slate-200">
+                            <Circle className="w-3 h-3 text-slate-500" />
+                            <span>Pilihan Ganda (Pilih 1 Jawaban)</span>
+                          </span>
+                        )}
+                        <span className={`text-[10px] px-2 py-0.5 rounded font-bold uppercase tracking-wider ${
+                          q.difficulty === 'Mudah' ? 'bg-emerald-100 text-emerald-700' :
+                          q.difficulty === 'Sedang' ? 'bg-amber-100 text-amber-700' : 'bg-rose-100 text-rose-700'
+                        }`}>
+                          {q.difficulty || 'Sedang'}
+                        </span>
                       </div>
+
+                      <p className="text-sm font-semibold text-slate-800 mb-3">{q.question}</p>
+
                       {(q.image || q.imageUrl) && (
                         <div className="mb-4 overflow-hidden rounded-xl border border-slate-200 bg-white p-2.5 flex flex-col items-center">
                           <img
@@ -847,36 +934,117 @@ export default function Ulangan() {
                           />
                         </div>
                       )}
-                      <div className="grid sm:grid-cols-2 gap-2">
-                        {q.options?.map(opt => (
-                           <label key={opt} className={`flex items-center px-3 py-2 border rounded-lg cursor-pointer transition-colors ${
-                              userAnswer === opt 
-                              ? (submitted ? (isCorrect ? 'bg-emerald-100 border-emerald-400' : 'bg-rose-100 border-rose-400') : 'bg-indigo-50 border-indigo-400 ring-1 ring-indigo-200')
-                              : (submitted && opt === q.answer ? 'bg-emerald-100 border-emerald-400' : 'bg-white border-slate-200 hover:bg-slate-50')
-                           }`}>
-                             <input 
-                               type="radio" 
-                               name={q.id} 
-                               value={opt} 
-                               checked={userAnswer === opt} 
-                               onChange={() => handlePgChange(q.id, opt)}
-                               disabled={submitted}
-                               className="w-4 h-4 text-indigo-600 border-slate-300 focus:ring-indigo-500 mr-2"
-                             />
-                             <span className={`text-sm text-slate-700 ${submitted && opt === q.answer ? 'font-bold text-emerald-800' : ''}`}>{opt}</span>
-                           </label>
-                        ))}
+
+                      <div className="grid sm:grid-cols-2 gap-2.5">
+                        {q.options?.map(opt => {
+                          const isSelected = isKompleks 
+                            ? userSelectedList.includes(opt)
+                            : userAnswer === opt;
+                          const isOptionInCorrectList = correctList.some(c => c.trim().toLowerCase() === opt.trim().toLowerCase());
+
+                          return (
+                            <div 
+                              key={opt} 
+                              onClick={() => {
+                                if (submitted) return;
+                                if (isKompleks) {
+                                  handlePgKompleksToggle(q.id, opt);
+                                } else {
+                                  handlePgChange(q.id, opt);
+                                }
+                              }}
+                              className={`flex items-start gap-3 p-3 border rounded-xl cursor-pointer transition-all select-none ${
+                                submitted
+                                  ? (isOptionInCorrectList
+                                      ? 'bg-emerald-100/80 border-emerald-400 text-emerald-950 font-semibold'
+                                      : (isSelected
+                                          ? 'bg-rose-100/80 border-rose-400 text-rose-950 line-through'
+                                          : 'bg-white border-slate-200 opacity-60 text-slate-600'))
+                                  : (isSelected
+                                      ? 'bg-indigo-50 border-indigo-400 ring-2 ring-indigo-200 text-indigo-950 shadow-xs'
+                                      : 'bg-white border-slate-200 hover:bg-slate-50 hover:border-slate-300 text-slate-700')
+                              }`}
+                            >
+                              {/* Indicator: Square Checkbox for PG Kompleks, Circle Radio for standard PG */}
+                              <div className="mt-0.5 flex-shrink-0">
+                                {isKompleks ? (
+                                  <div className={`w-5 h-5 rounded-md border flex items-center justify-center transition-all ${
+                                    submitted
+                                      ? (isOptionInCorrectList
+                                          ? 'border-emerald-600 bg-emerald-600 text-white shadow-xs'
+                                          : (isSelected
+                                              ? 'border-rose-500 bg-rose-500 text-white shadow-xs'
+                                              : 'border-slate-300 bg-white'))
+                                      : (isSelected
+                                          ? 'border-indigo-600 bg-indigo-600 text-white shadow-xs scale-105'
+                                          : 'border-slate-300 bg-white hover:border-slate-400')
+                                  }`}>
+                                    {(isSelected || (submitted && isOptionInCorrectList)) && (
+                                      <Check className="w-3.5 h-3.5 stroke-[3]" />
+                                    )}
+                                  </div>
+                                ) : (
+                                  <div className={`w-5 h-5 rounded-full border flex items-center justify-center transition-all ${
+                                    submitted
+                                      ? (isOptionInCorrectList
+                                          ? 'border-emerald-600 bg-emerald-600 text-white shadow-xs'
+                                          : (isSelected
+                                              ? 'border-rose-500 bg-rose-500 text-white shadow-xs'
+                                              : 'border-slate-300 bg-white'))
+                                      : (isSelected
+                                          ? 'border-indigo-600 bg-indigo-600 text-white shadow-xs'
+                                          : 'border-slate-300 bg-white hover:border-slate-400')
+                                  }`}>
+                                    {(isSelected || (submitted && isOptionInCorrectList)) && (
+                                      <div className="w-2 h-2 rounded-full bg-white" />
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                              <span className="text-sm leading-snug">{opt}</span>
+                            </div>
+                          );
+                        })}
                       </div>
                       
-                      {submitted && !isCorrect && (
-                         <div className="mt-3 p-3 bg-white/60 border border-emerald-200 rounded-lg text-emerald-800 text-xs font-medium">
-                           💡 Jawaban Benar: <strong className="font-mono text-sm">{q.answer}</strong>
+                      {submitted && (
+                         <div className={`mt-3.5 p-3 rounded-lg border text-xs ${
+                           isCorrect 
+                             ? 'bg-emerald-50 border-emerald-200 text-emerald-900' 
+                             : 'bg-white border-rose-200 text-slate-800'
+                         }`}>
+                           <div className="flex items-center gap-1.5 font-bold mb-1">
+                             {isCorrect ? (
+                               <span className="text-emerald-700 flex items-center gap-1">
+                                 <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                                 Jawabanmu Benar!
+                               </span>
+                             ) : (
+                               <span className="text-rose-600 flex items-center gap-1">
+                                 <AlertTriangle className="w-4 h-4 text-rose-500" />
+                                 Jawaban Belum Tepat
+                               </span>
+                             )}
+                           </div>
+                           <div className="mt-1">
+                             <span className="font-semibold text-slate-600">
+                               Kunci Jawaban ({isKompleks ? `${correctList.length} Pilihan Benar` : '1 Jawaban'}):
+                             </span>
+                             <div className="flex flex-wrap gap-1.5 mt-1.5">
+                               {correctList.map((ans, cIdx) => (
+                                 <span key={cIdx} className="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-100 text-emerald-800 rounded-md font-mono text-xs font-bold border border-emerald-200">
+                                   <Check className="w-3 h-3 text-emerald-600" />
+                                   {ans}
+                                 </span>
+                               ))}
+                             </div>
+                           </div>
                          </div>
                       )}
                     </div>
                  </div>
                </div>
-             )
+             );
            })}
         </div>
       </div>

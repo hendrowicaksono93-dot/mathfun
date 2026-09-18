@@ -115,7 +115,7 @@ function setup() {
   var sheetBank = ss.getSheetByName("Bank Soal");
   if (!sheetBank) { sheetBank = ss.insertSheet("Bank Soal"); }
   if (sheetBank.getLastRow() === 0) {
-    sheetBank.appendRow(["ID Materi", "Tipe (pg/isian)", "ID Soal", "Pertanyaan", "Opsi A", "Opsi B", "Opsi C", "Opsi D", "Kunci Jawaban", "Kesulitan", "Skor", "Link Gambar (Opsional)"]);
+    sheetBank.appendRow(["ID Materi", "Tipe (pg/pg_kompleks/isian)", "ID Soal", "Pertanyaan", "Opsi A", "Opsi B", "Opsi C", "Opsi D", "Kunci Jawaban", "Kesulitan", "Skor", "Link Gambar (Opsional)"]);
     sheetBank.getRange(1, 1, 1, 12).setFontWeight("bold").setBackground("#f3e8ff").setFontColor("#6b21a8");
     sheetBank.setFrozenRows(1);
   } else {
@@ -250,7 +250,14 @@ function doGet(e) {
 
           // Mengubah "Bilangan Bulat" -> "bilangan-bulat"
           var topicId = rawTopic.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
-          var type = row[1] ? row[1].toString().trim().toLowerCase() : "pg";
+          var rawType = row[1] ? row[1].toString().trim().toLowerCase() : "pg";
+          var type = "pg";
+          if (rawType === "isian") {
+            type = "isian";
+          } else if (rawType === "pg_kompleks" || rawType === "kompleks" || rawType === "pgk" || rawType.indexOf("kompleks") !== -1) {
+            type = "pg_kompleks";
+          }
+
           var idSoal = row[2] ? row[2].toString().trim() : ("q" + i);
           var question = row[3] ? row[3].toString().trim() : "";
 
@@ -265,30 +272,43 @@ function doGet(e) {
           var score = row[10] ? Number(row[10]) || 10 : 10;
           var rawImage = row[11] !== undefined && row[11] !== null ? row[11].toString().trim() : "";
 
-          var options = type === "pg" ? [opsiA, opsiB, opsiC, opsiD] : [];
+          var options = (type === "pg" || type === "pg_kompleks") ? [opsiA, opsiB, opsiC, opsiD] : [];
           var answer = rawAnswer;
 
-          // Jika di Kunci Jawaban diisi huruf A, B, C, atau D
-          if (type === "pg") {
-            var upper = rawAnswer.toUpperCase();
-            if (upper === "A" && opsiA) answer = opsiA;
-            else if (upper === "B" && opsiB) answer = opsiB;
-            else if (upper === "C" && opsiC) answer = opsiC;
-            else if (upper === "D" && opsiD) answer = opsiD;
+          // Jika di Kunci Jawaban diisi huruf A, B, C, atau D (bisa multi jawaban seperti "A, C" atau "A; B; D")
+          if (type === "pg" || type === "pg_kompleks") {
+            if (/^[A-Da-d](\s*[,;&]\s*[A-Da-d])+$/.test(rawAnswer)) {
+              type = "pg_kompleks";
+              var letters = rawAnswer.split(/[,;&]+/).map(function(s) { return s.trim().toUpperCase(); });
+              var ansList = [];
+              for (var li = 0; li < letters.length; li++) {
+                if (letters[li] === "A" && opsiA) ansList.push(opsiA);
+                else if (letters[li] === "B" && opsiB) ansList.push(opsiB);
+                else if (letters[li] === "C" && opsiC) ansList.push(opsiC);
+                else if (letters[li] === "D" && opsiD) ansList.push(opsiD);
+              }
+              answer = ansList.join("; ");
+            } else if (type === "pg") {
+              var upper = rawAnswer.toUpperCase();
+              if (upper === "A" && opsiA) answer = opsiA;
+              else if (upper === "B" && opsiB) answer = opsiB;
+              else if (upper === "C" && opsiC) answer = opsiC;
+              else if (upper === "D" && opsiD) answer = opsiD;
+            }
           }
 
           if (!bankSoal[topicId]) { bankSoal[topicId] = []; }
 
           var qObj = {
             id: idSoal,
-            type: type === "isian" ? "isian" : "pg",
+            type: type,
             question: question,
             answer: answer,
             difficulty: difficulty,
             score: score
           };
 
-          if (type === "pg") { qObj.options = options; }
+          if (type === "pg" || type === "pg_kompleks") { qObj.options = options; }
 
           if (rawImage) {
             qObj.image = rawImage;
@@ -1211,6 +1231,14 @@ export default function Home() {
                   <li>Ubah <em>Who has access (Siapa yang memiliki akses)</em> menjadi <strong>Anyone (Siapa saja)</strong>.</li>
                   <li>Salin URL Web App yang dihasilkan lalu tempel ke kolom <em>Google Apps Script Web App URL</em> di pengaturan guru.</li>
                 </ol>
+                <div className="mt-2.5 pt-2.5 border-t border-indigo-200/60 text-[11px] text-indigo-900">
+                  <p className="font-bold">✨ Format Pilihan Ganda Kompleks di Sheet "Bank Soal":</p>
+                  <ul className="list-disc pl-4 space-y-0.5 mt-1 text-indigo-800">
+                    <li><strong>Kolom Tipe:</strong> Isi dengan <code>pg_kompleks</code> (atau <code>pg</code>).</li>
+                    <li><strong>Kolom Kunci Jawaban:</strong> Isi dengan huruf opsi benar dipisah koma/titik-koma, contoh: <code>A, C</code> atau <code>A; B; D</code>.</li>
+                    <li>Pada tampilan siswa, soal otomatis menampilkan tombol <strong>kotak</strong> dengan centang (bukan bulat) dan dapat memilih lebih dari 1 jawaban.</li>
+                  </ul>
+                </div>
               </div>
 
               <div className="relative">
