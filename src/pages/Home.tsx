@@ -275,11 +275,11 @@ function doGet(e) {
           var options = (type === "pg" || type === "pg_kompleks") ? [opsiA, opsiB, opsiC, opsiD] : [];
           var answer = rawAnswer;
 
-          // Jika di Kunci Jawaban diisi huruf A, B, C, atau D (bisa multi jawaban seperti "A, C" atau "A; B; D")
+          // Jika di Kunci Jawaban diisi huruf A, B, C, atau D (bisa multi jawaban seperti "A, C" atau "A; B; D" atau "A & C")
           if (type === "pg" || type === "pg_kompleks") {
-            if (/^[A-Da-d](\s*[,;&]\s*[A-Da-d])+$/.test(rawAnswer)) {
+            if (/^[A-Da-d](\s*(?:[,;&]|dan)\s*[A-Da-d])+$/i.test(rawAnswer)) {
               type = "pg_kompleks";
-              var letters = rawAnswer.split(/[,;&]+/).map(function(s) { return s.trim().toUpperCase(); });
+              var letters = rawAnswer.split(/(?:\s*(?:[,;&]|dan)\s*)/i).map(function(s) { return s.trim().toUpperCase(); });
               var ansList = [];
               for (var li = 0; li < letters.length; li++) {
                 if (letters[li] === "A" && opsiA) ansList.push(opsiA);
@@ -287,8 +287,10 @@ function doGet(e) {
                 else if (letters[li] === "C" && opsiC) ansList.push(opsiC);
                 else if (letters[li] === "D" && opsiD) ansList.push(opsiD);
               }
-              answer = ansList.join("; ");
-            } else if (type === "pg") {
+              if (ansList.length > 0) {
+                answer = ansList.join("; ");
+              }
+            } else {
               var upper = rawAnswer.toUpperCase();
               if (upper === "A" && opsiA) answer = opsiA;
               else if (upper === "B" && opsiB) answer = opsiB;

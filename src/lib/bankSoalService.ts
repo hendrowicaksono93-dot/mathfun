@@ -47,43 +47,39 @@ export function parseCorrectAnswers(answerStr: string | string[], options: strin
   if (!answerStr) return [];
   const raw = String(answerStr).trim();
 
+  // CRITICAL: If the answer string matches one of the options verbatim, it is a single answer!
+  if (options && options.length > 0) {
+    const exactMatch = options.find(opt => opt.trim().toLowerCase() === raw.toLowerCase());
+    if (exactMatch) {
+      return [exactMatch.trim()];
+    }
+  }
+
   // 1. Delimiter: semicolon (;) or pipe (|)
   if (raw.includes(';') || raw.includes('|')) {
-    return raw.split(/[;|]+/)
+    const parts = raw.split(/[;|]+/).map(s => s.trim()).filter(Boolean);
+    if (parts.length > 1) {
+      return parts.map(s => resolveOptionValue(s, options));
+    }
+  }
+
+  // 2. Letters with commas/semicolons/ampersand/dan, e.g. "A, C" or "A; C" or "A, B, D" or "A dan C"
+  if (/^[A-Ea-e](\s*(?:[,;&]|dan)\s*[A-Ea-e])+$/i.test(raw)) {
+    return raw.split(/(?:\s*(?:[,;&]|dan)\s*)/i)
       .map(s => s.trim())
       .filter(Boolean)
       .map(s => resolveOptionValue(s, options));
   }
 
-  // 2. Delimiter: " dan " or " & "
-  if (/\s+(?:dan|&)\s+/i.test(raw)) {
-    return raw.split(/\s+(?:dan|&)\s+/i)
-      .map(s => s.trim())
-      .filter(Boolean)
-      .map(s => resolveOptionValue(s, options));
-  }
-
-  // 3. Letters with commas, e.g. "A, C" or "A, B, D" or "A,C"
-  if (/^[A-Ea-e](\s*,\s*[A-Ea-e])+$/.test(raw)) {
-    return raw.split(',')
-      .map(s => s.trim())
-      .filter(Boolean)
-      .map(s => resolveOptionValue(s, options));
-  }
-
-  // 4. Comma separated where each item matches an option or letter
+  // 3. Comma separated where each item matches an option or letter
   if (raw.includes(',') && options.length > 0) {
-    // If the whole string is an exact option (e.g. "0,6" or "1,5"), treat as single answer
-    const exactMatch = options.some(opt => opt.trim().toLowerCase() === raw.toLowerCase());
-    if (!exactMatch) {
-      const parts = raw.split(',').map(s => s.trim()).filter(Boolean);
-      const allPartsValid = parts.every(part => {
-        const u = part.toUpperCase();
-        return (u >= 'A' && u <= 'E') || options.some(opt => opt.trim().toLowerCase() === part.toLowerCase());
-      });
-      if (allPartsValid && parts.length > 1) {
-        return parts.map(s => resolveOptionValue(s, options));
-      }
+    const parts = raw.split(',').map(s => s.trim()).filter(Boolean);
+    const allPartsValid = parts.every(part => {
+      const u = part.toUpperCase();
+      return (u >= 'A' && u <= 'E') || options.some(opt => opt.trim().toLowerCase() === part.toLowerCase());
+    });
+    if (allPartsValid && parts.length > 1) {
+      return parts.map(s => resolveOptionValue(s, options));
     }
   }
 
@@ -95,13 +91,42 @@ export function parseCorrectAnswers(answerStr: string | string[], options: strin
  * Checks if question is Pilihan Ganda Kompleks (multi-choice)
  */
 export function isPgKompleksQuestion(q: QuestionItem): boolean {
-  if (q.type === 'pg_kompleks' || (q.type as string) === 'kompleks' || (q.type as string) === 'pgk') {
+  if (!q) return false;
+  const rawType = (q.type || '').toString().trim().toLowerCase();
+
+  // If explicitly declared as pg_kompleks / kompleks
+  if (
+    rawType === 'pg_kompleks' || 
+    rawType === 'kompleks' || 
+    rawType === 'pgk' || 
+    rawType.includes('kompleks')
+  ) {
     return true;
   }
-  if (q.type === 'pg') {
-    const correctList = parseCorrectAnswers(q.answer, q.options || []);
-    return correctList.length > 1;
+
+  // If type is 'pg', only treat as kompleks if answer is explicitly multiple
+  // and NOT a verbatim match to one of the options
+  if (rawType === 'pg') {
+    const rawAnswer = String(q.answer || '').trim();
+    if (!rawAnswer) return false;
+
+    // If answer exactly matches one of the options, it is NOT kompleks
+    if (q.options && q.options.some(opt => opt.trim().toLowerCase() === rawAnswer.toLowerCase())) {
+      return false;
+    }
+
+    // Explicit multiple choice letter format like "A, C" or "A; C" or "A & C"
+    if (/^[A-Ea-e](\s*(?:[,;&]|dan)\s*[A-Ea-e])+$/i.test(rawAnswer)) {
+      return true;
+    }
+
+    // Semicolon-delimited options
+    if (rawAnswer.includes(';') || rawAnswer.includes('|')) {
+      const parts = rawAnswer.split(/[;|]+/).map(s => s.trim()).filter(Boolean);
+      return parts.length > 1;
+    }
   }
+
   return false;
 }
 

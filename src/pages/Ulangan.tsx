@@ -646,7 +646,7 @@ export default function Ulangan() {
     }, 250);
   };
 
-  const pgQuestions = quizQuestions.filter(q => q.type === 'pg');
+  const pgQuestions = quizQuestions.filter(q => q.type !== 'isian');
   const isianQuestions = quizQuestions.filter(q => q.type === 'isian');
 
   if (!isUnlocked) {
