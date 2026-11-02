@@ -1,3 +1,5 @@
+import { svgTransformasi1, svgTransformasi2, svgTransformasi3, svgTransformasi4, svgTransformasi5 } from './transformasiSvg';
+
 export const bilanganRasionalQuestions = [
   {
     id: 'q1',
@@ -660,11 +662,11 @@ export const bangunRuangSisiLengkungQuestions = [
   { id: 'brsli5', type: 'isian', question: 'Sebuah tabung tanpa tutup memiliki jari-jari 7 dan tinggi 10. Berapakah luas permukaannya? (angka saja, π=22/7)', answer: '594', difficulty: 'Sulit' }
 ];
 export const transformasiGeometriQuestions = [
-  { id: 'tg1', type: 'pg', question: 'Titik A(2, 3) ditranslasikan oleh T(4, -1). Koordinat bayangan A adalah...', options: ['(6, 2)', '(6, 4)', '(2, 2)', '(-2, 4)'], answer: '(6, 2)', difficulty: 'Mudah' },
-  { id: 'tg2', type: 'pg', question: 'Hasil pencerminan titik B(-3, 5) terhadap sumbu X adalah...', options: ['(-3, -5)', '(3, 5)', '(3, -5)', '(5, -3)'], answer: '(-3, -5)', difficulty: 'Mudah' },
-  { id: 'tg3', type: 'pg', question: 'Titik C(1, 4) dicerminkan terhadap garis y = x. Bayangannya adalah...', options: ['(4, 1)', '(-1, -4)', '(-4, -1)', '(1, -4)'], answer: '(4, 1)', difficulty: 'Sedang' },
-  { id: 'tg4', type: 'pg', question: 'Titik D(2, 5) dirotasikan 90° berlawanan arah jarum jam dengan pusat O(0,0). Bayangannya...', options: ['(-5, 2)', '(5, -2)', '(-2, 5)', '(2, -5)'], answer: '(-5, 2)', difficulty: 'Sedang' },
-  { id: 'tg5', type: 'pg', question: 'Titik E(-2, 4) didilatasikan dengan pusat O(0,0) faktor skala 3. Bayangannya adalah...', options: ['(-6, 12)', '(6, -12)', '(-2, 12)', '(-6, 4)'], answer: '(-6, 12)', difficulty: 'Mudah' },
+  { id: 'tg1', type: 'pg', question: 'Perhatikan diagram kartesius berikut. Titik A(2, 3) ditranslasikan oleh T(4, -1). Koordinat bayangan A adalah...', options: ['(6, 2)', '(6, 4)', '(2, 2)', '(-2, 4)'], answer: '(6, 2)', difficulty: 'Mudah', image: svgTransformasi1 },
+  { id: 'tg2', type: 'pg', question: 'Perhatikan diagram refleksi berikut. Hasil pencerminan titik B(-3, 5) terhadap sumbu X adalah...', options: ['(-3, -5)', '(3, 5)', '(3, -5)', '(5, -3)'], answer: '(-3, -5)', difficulty: 'Mudah', image: svgTransformasi2 },
+  { id: 'tg3', type: 'pg', question: 'Perhatikan garis cermin y = x berikut. Titik C(1, 4) dicerminkan terhadap garis y = x. Bayangannya adalah...', options: ['(4, 1)', '(-1, -4)', '(-4, -1)', '(1, -4)'], answer: '(4, 1)', difficulty: 'Sedang', image: svgTransformasi3 },
+  { id: 'tg4', type: 'pg', question: 'Perhatikan diagram rotasi berikut. Titik D(2, 5) dirotasikan 90° berlawanan arah jarum jam dengan pusat O(0,0). Bayangannya...', options: ['(-5, 2)', '(5, -2)', '(-2, 5)', '(2, -5)'], answer: '(-5, 2)', difficulty: 'Sedang', image: svgTransformasi4 },
+  { id: 'tg5', type: 'pg', question: 'Perhatikan diagram dilatasi berikut. Titik E(-2, 4) didilatasikan dengan pusat O(0,0) faktor skala k = 3. Bayangannya adalah...', options: ['(-6, 12)', '(6, -12)', '(-2, 12)', '(-6, 4)'], answer: '(-6, 12)', difficulty: 'Mudah', image: svgTransformasi5 },
   { id: 'tg6', type: 'pg', question: 'Bayangan titik P(5, -2) oleh rotasi 180° dengan pusat O(0,0) adalah...', options: ['(-5, 2)', '(5, 2)', '(-5, -2)', '(2, -5)'], answer: '(-5, 2)', difficulty: 'Sedang' },
   { id: 'tg7', type: 'pg', question: 'Garis y = 2x + 1 dicerminkan terhadap sumbu Y. Persamaan bayangannya...', options: ['y = -2x + 1', 'y = 2x - 1', 'y = -2x - 1', 'x = 2y + 1'], answer: 'y = -2x + 1', difficulty: 'Sulit' },
   { id: 'tg8', type: 'pg', question: 'Jika titik Q ditranslasikan oleh T(3, 2) menghasilkan Q\'(1, 5), maka koordinat Q adalah...', options: ['(-2, 3)', '(4, 7)', '(2, -3)', '(-2, 7)'], answer: '(-2, 3)', difficulty: 'Sedang' },

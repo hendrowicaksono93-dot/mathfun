@@ -172,20 +172,53 @@ export function isQuestionAnswerCorrect(q: QuestionItem, userAnswer: string | st
 }
 
 /**
+ * Extracts Google Drive File ID from various link formats
+ */
+export function extractGoogleDriveFileId(url: string): string | null {
+  if (!url) return null;
+  const clean = url.trim();
+  // Match drive.google.com (file/d/, open?id=, uc?id=, uc?export=view&id=) or lh3.googleusercontent.com/d/ or docs.google.com
+  const match = clean.match(/(?:drive\.google\.com\/(?:file\/d\/|open\?id=|uc\?(?:[^&]+&)*id=)|lh3\.googleusercontent\.com\/d\/|docs\.google\.com\/[^/]+\/d\/)([a-zA-Z0-9_-]{20,})/i);
+  if (match && match[1]) {
+    return match[1];
+  }
+  return null;
+}
+
+/**
+ * Returns an ordered array of candidate URLs to load an image,
+ * providing multi-CDN fallbacks especially for Google Drive links.
+ */
+export function getQuestionImageCandidates(url?: string): string[] {
+  if (!url) return [];
+  const clean = url.trim();
+  if (!clean) return [];
+
+  // Data URIs or local assets
+  if (clean.startsWith('data:') || clean.startsWith('blob:') || clean.startsWith('/')) {
+    return [clean];
+  }
+
+  const driveId = extractGoogleDriveFileId(clean);
+  if (driveId) {
+    return [
+      `https://lh3.googleusercontent.com/d/${driveId}=w1200`,
+      `https://drive.google.com/thumbnail?id=${driveId}&sz=w1200`,
+      `https://drive.google.com/uc?export=view&id=${driveId}`
+    ];
+  }
+
+  return [clean];
+}
+
+/**
  * Format image URLs especially from Google Drive share links
  * e.g. https://drive.google.com/file/d/FILE_ID/view -> direct image thumbnail
  */
 export function formatQuestionImageUrl(url?: string): string {
   if (!url) return '';
-  const clean = url.trim();
-  if (!clean) return '';
-
-  // Google Drive URL converter
-  const gdMatch = clean.match(/(?:drive\.google\.com\/(?:file\/d\/|open\?id=)|lh3\.googleusercontent\.com\/d\/)([a-zA-Z0-9_-]+)/);
-  if (gdMatch && gdMatch[1]) {
-    return `https://drive.google.com/thumbnail?id=${gdMatch[1]}&sz=w1000`;
-  }
-  return clean;
+  const candidates = getQuestionImageCandidates(url);
+  return candidates[0] || url.trim();
 }
 
 export interface TopicBankSoal {

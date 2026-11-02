@@ -4,6 +4,7 @@ import confetti from 'canvas-confetti';
 import { KeyRound, Lock, ShieldAlert, ShieldCheck, ArrowLeft, CheckCircle2, AlertTriangle, EyeOff, CameraOff, Check, CheckSquare, Circle, Square } from 'lucide-react';
 import { db, collection, addDoc } from '../lib/firebase';
 import { useAuth } from '../lib/AuthContext';
+import QuestionImage from '../components/QuestionImage';
 import { appendScoreToSheet, getUlanganPin, getGuruPin, getScriptUrl, setScriptUrl, getTopicPinsFromStorage, setTopicPinInStorage } from '../lib/sheets';
 import { 
   getBankSoalFromFirestore, 
@@ -925,14 +926,10 @@ export default function Ulangan() {
                       <p className="text-sm font-semibold text-slate-800 mb-3">{q.question}</p>
 
                       {(q.image || q.imageUrl) && (
-                        <div className="mb-4 overflow-hidden rounded-xl border border-slate-200 bg-white p-2.5 flex flex-col items-center">
-                          <img
-                            src={formatQuestionImageUrl(q.image || q.imageUrl)}
-                            alt={`Gambar Soal ${idx + 1}`}
-                            referrerPolicy="no-referrer"
-                            className="max-h-64 md:max-h-72 w-auto max-w-full object-contain rounded-lg shadow-xs"
-                          />
-                        </div>
+                        <QuestionImage
+                          src={q.image || q.imageUrl}
+                          alt={`Gambar Soal ${idx + 1}`}
+                        />
                       )}
 
                       <div className="grid sm:grid-cols-2 gap-2.5">
@@ -1071,14 +1068,10 @@ export default function Ulangan() {
                           <span className={`text-[10px] px-2 py-1 rounded font-bold uppercase tracking-wider ${q.difficulty === 'Mudah' ? 'bg-emerald-100 text-emerald-700' : q.difficulty === 'Sedang' ? 'bg-amber-100 text-amber-700' : 'bg-rose-100 text-rose-700'}`}>{q.difficulty}</span>
                         </div>
                         {(q.image || q.imageUrl) && (
-                          <div className="mb-4 overflow-hidden rounded-xl border border-slate-200 bg-white p-2.5 flex flex-col items-center">
-                            <img
-                              src={formatQuestionImageUrl(q.image || q.imageUrl)}
-                              alt={`Gambar Soal ${idx + 1}`}
-                              referrerPolicy="no-referrer"
-                              className="max-h-64 md:max-h-72 w-auto max-w-full object-contain rounded-lg shadow-xs"
-                            />
-                          </div>
+                          <QuestionImage
+                            src={q.image || q.imageUrl}
+                            alt={`Gambar Soal ${idx + 1}`}
+                          />
                         )}
                         
                         <input
