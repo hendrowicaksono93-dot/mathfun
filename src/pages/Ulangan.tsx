@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import confetti from 'canvas-confetti';
-import { KeyRound, Lock, ShieldAlert, ShieldCheck, ArrowLeft, CheckCircle2, AlertTriangle, EyeOff, CameraOff, Check, CheckSquare, Circle, Square } from 'lucide-react';
+import { KeyRound, Lock, ShieldAlert, ShieldCheck, ArrowLeft, CheckCircle2, AlertTriangle, EyeOff, CameraOff, Check, CheckSquare, Circle, Square, Trophy, RotateCcw, Home, BookOpen, History, RefreshCw, UserCheck } from 'lucide-react';
 import { db, collection, addDoc } from '../lib/firebase';
 import { useAuth } from '../lib/AuthContext';
 import QuestionImage from '../components/QuestionImage';
 import { appendScoreToSheet, getUlanganPin, getGuruPin, getScriptUrl, setScriptUrl, getTopicPinsFromStorage, setTopicPinInStorage } from '../lib/sheets';
+import { getUserAttemptData, recordUserAttempt, resetUserAttempts, UserAttemptData } from '../lib/attemptService';
 import { 
   getBankSoalFromFirestore, 
   saveBankSoalToFirestore, 
@@ -14,7 +15,6 @@ import {
   toTopicSlug,
   formatQuestionImageUrl,
   isPgKompleksQuestion,
-  parseCorrectAnswers,
   isQuestionAnswerCorrect,
   QuestionItem 
 } from '../lib/bankSoalService';
@@ -85,11 +85,48 @@ export default function Ulangan() {
   const [isFromFirestore, setIsFromFirestore] = useState<boolean>(false);
   const [loadingQuestions, setLoadingQuestions] = useState<boolean>(true);
 
+  // Attempt Limit States (Max 2 Attempts per Account per Topic)
+  const isGuru = new URLSearchParams(window.location.search).get('guru') === 'true' || 
+    new URLSearchParams(window.location.search).get('admin') === 'true' || 
+    Boolean(user?.email && (user.email.includes('guru') || user.email.includes('admin')));
+
+  const [attemptData, setAttemptData] = useState<UserAttemptData>({ count: 0, history: [], isMaxReached: false });
+  const [loadingAttempts, setLoadingAttempts] = useState<boolean>(true);
+  const [isResettingAttempt, setIsResettingAttempt] = useState<boolean>(false);
+
+  // Load user attempts for current account and topic
+  useEffect(() => {
+    let isMounted = true;
+    async function loadAttempts() {
+      if (!user?.uid && !user?.email) {
+        setLoadingAttempts(false);
+        return;
+      }
+      setLoadingAttempts(true);
+      try {
+        const data = await getUserAttemptData(user?.uid || '', currentTopic.id, user?.email);
+        if (isMounted) {
+          setAttemptData(data);
+        }
+      } catch (err) {
+        console.warn('Gagal memuat status percobaan:', err);
+      } finally {
+        if (isMounted) {
+          setLoadingAttempts(false);
+        }
+      }
+    }
+    loadAttempts();
+    return () => { isMounted = false; };
+  }, [user?.uid, user?.email, currentTopic.id]);
+
   const [answers, setAnswers] = useState<Record<string, string | string[]>>({});
   const [submitted, setSubmitted] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState<string>('');
   const [scoreInfo, setScoreInfo] = useState({ pg: 0, isian: 0, total: 0 });
+  const [showUnansweredModal, setShowUnansweredModal] = useState<boolean>(false);
+  const [unansweredCount, setUnansweredCount] = useState<number>(0);
 
   // Anti-Cheat States
   const [violationCount, setViolationCount] = useState<number>(0);
@@ -520,22 +557,33 @@ export default function Ulangan() {
       return String(a).trim() === '';
     });
 
-    if (missing.length > 0 && !window.confirm(`Ada ${missing.length} soal yang belum dijawab. Yakin ingin mengumpulkan?`)) {
+    if (missing.length > 0) {
+      setUnansweredCount(missing.length);
+      setShowUnansweredModal(true);
       return;
     }
 
+    executeSubmit();
+  };
+
+  const executeSubmit = () => {
+    setShowUnansweredModal(false);
     let pgCorrect = 0;
     let isianCorrect = 0;
 
     quizQuestions.forEach(q => {
-      if (q.type === 'isian') {
-        let ans = (answers[q.id] || '').toString().trim().toLowerCase();
-        let correct = q.answer.toString().trim().toLowerCase();
-        if (ans === correct) isianCorrect++;
-      } else {
-        if (isQuestionAnswerCorrect(q, answers[q.id])) {
-          pgCorrect++;
+      try {
+        if (q.type === 'isian') {
+          const ans = (answers[q.id] || '').toString().trim().toLowerCase();
+          const correct = (q.answer ?? '').toString().trim().toLowerCase();
+          if (ans && ans === correct) isianCorrect++;
+        } else {
+          if (isQuestionAnswerCorrect(q, answers[q.id])) {
+            pgCorrect++;
+          }
         }
+      } catch (e) {
+        console.warn('Evaluasi jawaban error:', e);
       }
     });
 
@@ -554,6 +602,7 @@ export default function Ulangan() {
 
     setScoreInfo({ pg: pgCorrect, isian: isianCorrect, total: finalScore });
     setSubmitted(true);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
     
     // Simpan ke Firebase Firestore & Google Spreadsheet
     saveScoreToFirebaseAndSheets(finalScore, pgCorrect, isianCorrect);
@@ -572,7 +621,7 @@ export default function Ulangan() {
       const email = user?.email || 'siswa@example.com';
       const nowStr = new Date().toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' });
 
-      // 1. Simpan ke Firebase Firestore
+      // 1. Simpan ke Firebase Firestore scores
       try {
         await addDoc(collection(db, 'scores'), {
           userId: user?.uid || null,
@@ -590,9 +639,39 @@ export default function Ulangan() {
         console.warn('Simpan Firestore offline/tertunda:', fsErr);
       }
 
+      // 2. Simpan & perbarui batasan kuota percobaan (Maksimal 2x per akun)
+      try {
+        const attemptResult = await recordUserAttempt(user?.uid || email, currentTopic.id, {
+          score: total,
+          pg,
+          isian,
+          email,
+          fullName: name,
+          topicName: currentTopic.name,
+        });
+
+        setAttemptData(prev => ({
+          count: attemptResult.newCount,
+          isMaxReached: attemptResult.isMaxReached,
+          bestScore: prev.bestScore !== undefined ? Math.max(prev.bestScore, total) : total,
+          history: [
+            ...prev.history,
+            {
+              attemptNumber: attemptResult.newCount,
+              score: total,
+              date: new Date().toISOString(),
+              pg,
+              isian
+            }
+          ]
+        }));
+      } catch (attErr) {
+        console.warn('Gagal mencatat percobaan ke Firestore:', attErr);
+      }
+
       setSaveStatus('Mencatat nilai ke Google Spreadsheet...');
 
-      // 2. Simpan ke Google Spreadsheet
+      // 3. Simpan ke Google Spreadsheet
       const sheetRes = await appendScoreToSheet({
         fullName: name,
         email: email,
@@ -617,14 +696,29 @@ export default function Ulangan() {
     }
   };
 
-  const resetQuiz = () => {
-    if(window.confirm('Yakin ingin mereset ulangan? Semua jawaban akan dihapus.')) {
-        setAnswers({});
-        setSubmitted(false);
-        setSaveStatus('');
-        setScoreInfo({ pg: 0, isian: 0, total: 0 });
-        window.scrollTo({ top: 0, behavior: 'smooth' });
+  const handleResetAttempts = async () => {
+    if (!user) return;
+    setIsResettingAttempt(true);
+    try {
+      await resetUserAttempts(user.uid, currentTopic.id, user.email);
+      setAttemptData({ count: 0, history: [], isMaxReached: false, bestScore: undefined });
+      setSaveStatus('✅ Kuota percobaan berhasil di-reset.');
+    } catch (e) {
+      console.error('Gagal reset attempt:', e);
+    } finally {
+      setIsResettingAttempt(false);
     }
+  };
+
+  const resetQuiz = () => {
+    if (attemptData.isMaxReached && !isGuru) {
+      return;
+    }
+    setAnswers({});
+    setSubmitted(false);
+    setSaveStatus('');
+    setScoreInfo({ pg: 0, isian: 0, total: 0 });
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const triggerConfetti = () => {
@@ -650,6 +744,136 @@ export default function Ulangan() {
   const pgQuestions = quizQuestions.filter(q => q.type !== 'isian');
   const isianQuestions = quizQuestions.filter(q => q.type === 'isian');
 
+  // 1. Validasi Akun Siswa (Wajib Login agar batas 2x pengerjaan terpantau per akun)
+  if (!user) {
+    return (
+      <div className="max-w-md mx-auto my-12 p-6 md:p-8 bg-white border border-slate-200 rounded-3xl shadow-xl text-center animate-in zoom-in-95 duration-300">
+        <div className="w-16 h-16 bg-amber-50 border border-amber-200 rounded-2xl flex items-center justify-center mx-auto mb-4 text-amber-600 shadow-sm">
+          <Lock className="w-8 h-8" />
+        </div>
+        <h2 className="text-xl font-bold text-slate-800 tracking-tight">Login Diperlukan untuk Ulangan</h2>
+        <p className="text-xs text-slate-600 mt-2 leading-relaxed">
+          Materi: <strong className="text-indigo-700">{currentTopic.name}</strong><br/>
+          Sesuai aturan ujian, setiap akun siswa dibatasi <strong>maksimal 2 kali pengerjaan</strong> agar siswa tidak banyak coba-coba. Silakan masuk dengan akun terdaftar Anda.
+        </p>
+        <div className="mt-6 space-y-3">
+          <button
+            onClick={() => navigate('/login')}
+            className="w-full py-3.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-sm transition-all shadow-md shadow-indigo-200 flex items-center justify-center gap-2 cursor-pointer"
+          >
+            <UserCheck className="w-4 h-4" />
+            <span>Masuk / Login Akun Siswa</span>
+          </button>
+          <button
+            onClick={() => navigate('/')}
+            className="w-full py-2.5 text-xs text-slate-500 hover:text-slate-700 font-medium flex items-center justify-center gap-1 cursor-pointer"
+          >
+            <ArrowLeft className="w-3.5 h-3.5" />
+            <span>Kembali ke Beranda</span>
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // 2. Loading State Pengecekan Riwayat Kuota Akun
+  if (loadingAttempts) {
+    return (
+      <div className="max-w-md mx-auto my-16 p-8 bg-white border border-slate-200 rounded-3xl shadow-xl text-center">
+        <div className="w-12 h-12 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
+        <h3 className="text-base font-bold text-slate-800">Memeriksa Kuota Ulangan...</h3>
+        <p className="text-xs text-slate-500 mt-1">Memvalidasi riwayat pengerjaan akun Anda di sistem.</p>
+      </div>
+    );
+  }
+
+  // 3. Batas Kuota Tercapai (Sudah 2 Kali Mengerjakan)
+  if (attemptData.isMaxReached && !isGuru) {
+    return (
+      <div className="max-w-xl mx-auto my-10 p-6 md:p-8 bg-white border-2 border-rose-200 rounded-3xl shadow-xl animate-in zoom-in-95 duration-300">
+        <div className="w-16 h-16 bg-rose-50 border border-rose-200 rounded-2xl flex items-center justify-center mx-auto mb-4 text-rose-600 shadow-sm">
+          <ShieldAlert className="w-8 h-8" />
+        </div>
+
+        <div className="text-center mb-6">
+          <span className="inline-block px-3 py-1 bg-rose-100 text-rose-800 border border-rose-300 rounded-full text-[11px] font-bold uppercase tracking-wider mb-2">
+            Batas Kuota Ulangan Habis
+          </span>
+          <h2 className="text-xl md:text-2xl font-black text-slate-800 tracking-tight">
+            Kesempatan Pengerjaan Telah Habis
+          </h2>
+          <p className="text-xs md:text-sm text-slate-600 mt-2 leading-relaxed">
+            Akun <strong className="text-slate-800">{user.email}</strong> telah menggunakan <strong>2 dari 2 kesempatan</strong> ulangan harian materi <strong className="text-indigo-700">{currentTopic.name}</strong>.
+          </p>
+        </div>
+
+        {/* Ringkasan Nilai dan Riwayat 2x Percobaan */}
+        <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 md:p-5 mb-6 space-y-3">
+          <div className="flex items-center justify-between pb-2 border-b border-slate-200 text-xs">
+            <span className="font-bold text-slate-700 flex items-center gap-1.5">
+              <History className="w-4 h-4 text-indigo-600" />
+              <span>Riwayat 2 Kali Percobaan Anda:</span>
+            </span>
+            <span className="font-extrabold text-indigo-700 text-sm">
+              Nilai Terbaik: {attemptData.bestScore ?? '-'}
+            </span>
+          </div>
+
+          <div className="space-y-2">
+            {attemptData.history.map((att, idx) => (
+              <div key={idx} className="bg-white border border-slate-200 rounded-xl p-3 flex items-center justify-between text-xs">
+                <div>
+                  <p className="font-bold text-slate-800">
+                    Percobaan #{att.attemptNumber || idx + 1}
+                  </p>
+                  <p className="text-[11px] text-slate-500">
+                    {att.date ? new Date(att.date).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' }) : 'Selesai'}
+                  </p>
+                </div>
+                <div className="text-right">
+                  <span className={`text-base font-black px-2.5 py-0.5 rounded-lg ${
+                    att.score >= 75 ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
+                  }`}>
+                    {att.score}
+                  </span>
+                  <p className="text-[10px] text-slate-500 mt-0.5">
+                    {att.score >= 75 ? 'Tuntas' : 'Belum Tuntas'}
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-[11px] text-amber-800 leading-relaxed flex items-start gap-2">
+            <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+            <span>
+              Sesuai ketentuan asesmen Kurikulum Merdeka, siswa dibatasi maksimal 2 kali agar tidak melakukan spekulasi/coba-coba. Nilai terbaik Anda telah tersimpan dan tercatat di Guru.
+            </span>
+          </div>
+        </div>
+
+        {/* Tombol Aksi */}
+        <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
+          <button
+            onClick={() => navigate('/')}
+            className="w-full sm:w-auto px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-sm font-bold transition-all shadow-md shadow-indigo-200 flex items-center justify-center gap-2 cursor-pointer"
+          >
+            <Home className="w-4 h-4" />
+            <span>Kembali ke Beranda</span>
+          </button>
+          <button
+            onClick={() => navigate(`/materi/${currentTopic.id}`)}
+            className="w-full sm:w-auto px-6 py-3 bg-slate-100 hover:bg-slate-200 border border-slate-300 text-slate-700 rounded-xl text-sm font-bold transition-all flex items-center justify-center gap-2 cursor-pointer"
+          >
+            <BookOpen className="w-4 h-4" />
+            <span>Pelajari Materi Ini</span>
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // 4. Layar Verifikasi PIN (Jika Belum Terbuka)
   if (!isUnlocked) {
     return (
       <div className="max-w-md mx-auto my-12 p-6 md:p-8 bg-white border border-slate-200 rounded-3xl shadow-xl animate-in zoom-in-95 duration-300">
@@ -657,12 +881,43 @@ export default function Ulangan() {
           <KeyRound className="w-8 h-8" />
         </div>
         
-        <div className="text-center mb-6">
+        <div className="text-center mb-5">
           <h2 className="text-xl font-bold text-slate-800 tracking-tight">PIN Akses Ulangan Harian</h2>
           <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
             Materi: <strong className="text-indigo-700">{currentTopic.name}</strong><br/>
             Silakan masukkan PIN Ulangan Harian yang diberikan oleh Guru untuk memulai tes.
           </p>
+        </div>
+
+        {/* Informasi Akun & Kuota Percobaan */}
+        <div className="mb-5 p-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-xs space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-slate-500 font-medium">Akun Siswa:</span>
+            <span className="font-bold text-slate-800 truncate max-w-[200px]">{user.fullName || user.email}</span>
+          </div>
+          <div className="flex items-center justify-between border-t border-slate-200/80 pt-2">
+            <span className="text-slate-500 font-medium">Status Kesempatan:</span>
+            <span className={`px-2.5 py-0.5 rounded-full font-bold text-[11px] border ${
+              attemptData.count === 0 
+                ? 'bg-emerald-50 text-emerald-800 border-emerald-200' 
+                : 'bg-amber-50 text-amber-800 border-amber-200'
+            }`}>
+              {attemptData.count === 0 ? 'Percobaan 1 dari 2' : '⚠️ Percobaan 2 dari 2 (Terakhir)'}
+            </span>
+          </div>
+          {isGuru && (
+            <div className="pt-2 border-t border-slate-200/80 flex items-center justify-between text-[11px]">
+              <span className="text-purple-700 font-bold">Mode Guru Aktif:</span>
+              <button
+                type="button"
+                onClick={handleResetAttempts}
+                disabled={isResettingAttempt}
+                className="text-purple-600 hover:text-purple-800 underline font-semibold cursor-pointer"
+              >
+                {isResettingAttempt ? 'Mereset...' : 'Reset Kuota Akun'}
+              </button>
+            </div>
+          )}
         </div>
 
         <form onSubmit={handleVerifyPin} className="space-y-4">
@@ -692,15 +947,15 @@ export default function Ulangan() {
           <button
             type="submit"
             disabled={checkingOnlinePin || !pinInput.trim()}
-            className="w-full py-3.5 bg-indigo-600 text-white rounded-xl text-sm font-bold hover:bg-indigo-700 transition-colors shadow-md shadow-indigo-200 flex items-center justify-center gap-2 disabled:opacity-50"
+            className="w-full py-3.5 bg-indigo-600 text-white rounded-xl text-sm font-bold hover:bg-indigo-700 transition-colors shadow-md shadow-indigo-200 flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer"
           >
-            {checkingOnlinePin ? 'Memeriksa PIN...' : 'Mulai Kerjakan Tes'}
+            {checkingOnlinePin ? 'Memeriksa PIN...' : `Mulai Kerjakan (Percobaan ke-${attemptData.count + 1})`}
           </button>
 
           <button
             type="button"
             onClick={() => navigate('/')}
-            className="w-full py-2.5 text-xs text-slate-500 hover:text-slate-700 font-medium flex items-center justify-center gap-1"
+            className="w-full py-2.5 text-xs text-slate-500 hover:text-slate-700 font-medium flex items-center justify-center gap-1 cursor-pointer"
           >
             <ArrowLeft className="w-3.5 h-3.5" />
             <span>Kembali ke Beranda</span>
@@ -799,7 +1054,15 @@ export default function Ulangan() {
               </p>
             </div>
           </div>
-          <div className="flex items-center gap-2 self-start md:self-auto">
+          <div className="flex items-center gap-2 self-start md:self-auto flex-wrap">
+            <span className={`px-2.5 py-1 rounded-lg font-bold text-[11px] flex items-center gap-1 border ${
+              attemptData.count === 0 
+                ? 'bg-blue-100 text-blue-800 border-blue-200' 
+                : 'bg-amber-100 text-amber-900 border-amber-300'
+            }`}>
+              <History className="w-3 h-3" />
+              <span>{attemptData.count === 0 ? 'Percobaan 1 dari 2' : 'Kesempatan Terakhir (2 dari 2)'}</span>
+            </span>
             <span className={`px-2.5 py-1 rounded-lg font-bold text-[11px] flex items-center gap-1 border ${
               violationCount === 0 
                 ? 'bg-emerald-100/80 text-emerald-800 border-emerald-200' 
@@ -823,43 +1086,129 @@ export default function Ulangan() {
         </div>
       )}
 
-      {submitted && (
-        <div className="bg-indigo-900 border border-indigo-800 text-white rounded-xl p-6 md:p-8 mb-8 text-center shadow-lg animate-in zoom-in-95 duration-500 relative overflow-hidden">
-          <div className="relative z-10">
-            <h2 className="text-sm font-bold text-indigo-300 uppercase tracking-widest mb-1">Nilai Akhir</h2>
-            <div className="text-5xl md:text-6xl font-black mb-6 text-white">{scoreInfo.total}</div>
-            
-            <div className="grid grid-cols-2 gap-4 max-w-sm mx-auto mb-6 bg-indigo-950/50 border border-indigo-800 p-4 rounded-xl">
-               <div>
-                 <p className="text-indigo-300 text-xs uppercase tracking-wider mb-1">Pilihan Ganda / PGK</p>
-                 <p className="text-lg font-bold text-white">{scoreInfo.pg} <span className="text-xs font-normal text-indigo-400">/ {pgQuestions.length} Benar</span></p>
-               </div>
-               <div>
-                 <p className="text-indigo-300 text-xs uppercase tracking-wider mb-1">Isian Singkat</p>
-                 <p className="text-lg font-bold text-white">{scoreInfo.isian} <span className="text-xs font-normal text-indigo-400">/ {isianQuestions.length} Benar</span></p>
-               </div>
-            </div>
-            
-            {scoreInfo.total >= 75 ? (
-                <p className="text-sm font-medium text-emerald-400">🎉 Luar Biasa! Kamu sudah menguasai materi ini.</p>
-            ) : (
-                <p className="text-sm font-medium text-amber-400">💪 Jangan menyerah! Pelajari lagi materinya ya.</p>
-            )}
-            
-            {saveStatus && (
-              <p className="text-xs text-indigo-200 mt-3 font-medium bg-indigo-950/80 px-4 py-2 rounded-lg border border-indigo-700/50 inline-block">
-                {saveStatus}
-              </p>
-            )}
+      {/* Jika Ujian Sudah Selesai / Dikumpulkan: Tampilkan HANYA Nilai / Skor Saja */}
+      {submitted ? (
+        <div className="max-w-2xl mx-auto my-6 animate-in zoom-in-95 duration-500">
+          <div className="bg-gradient-to-br from-indigo-900 via-indigo-950 to-slate-950 border-2 border-indigo-500/40 text-white rounded-3xl p-6 md:p-10 text-center shadow-2xl relative overflow-hidden">
+            <div className="absolute -top-24 -left-24 w-64 h-64 bg-indigo-500/20 rounded-full blur-3xl pointer-events-none" />
+            <div className="absolute -bottom-24 -right-24 w-64 h-64 bg-purple-500/20 rounded-full blur-3xl pointer-events-none" />
 
-            <div>
-              <button onClick={resetQuiz} className="mt-6 px-6 py-2.5 bg-indigo-600 text-white text-sm font-bold rounded-lg hover:bg-indigo-500 transition-colors shadow-sm">Ulangi Tes</button>
+            <div className="relative z-10">
+              <div className="w-16 h-16 rounded-2xl bg-indigo-500/20 border border-indigo-400/40 flex items-center justify-center mx-auto mb-4 text-amber-300 shadow-inner">
+                <Trophy className="w-9 h-9" />
+              </div>
+
+              <span className="inline-block px-3 py-1 bg-indigo-500/30 text-indigo-200 border border-indigo-400/30 rounded-full text-xs font-bold uppercase tracking-wider mb-2">
+                Ulangan Selesai • {currentTopic.name}
+              </span>
+              
+              <h2 className="text-xs md:text-sm font-semibold text-indigo-300 uppercase tracking-widest mb-1">
+                Nilai Akhir Siswa
+              </h2>
+              
+              <div className="text-6xl md:text-7xl font-black mb-4 tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-white via-indigo-100 to-amber-200">
+                {scoreInfo.total}
+              </div>
+
+              {scoreInfo.total >= 75 ? (
+                <div className="mb-4 inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-emerald-500/20 border border-emerald-400/40 text-emerald-300 text-xs md:text-sm font-bold">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                  <span>🎉 Tuntas! Kamu telah menguasai materi ini dengan baik.</span>
+                </div>
+              ) : (
+                <div className="mb-4 inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-amber-500/20 border border-amber-400/40 text-amber-300 text-xs md:text-sm font-bold">
+                  <AlertTriangle className="w-4 h-4 text-amber-400" />
+                  <span>💪 Belum Tuntas. Pelajari lagi materi untuk pemahaman lebih baik.</span>
+                </div>
+              )}
+
+              {/* Status Kesempatan / Kuota Pengerjaan */}
+              {attemptData.count >= 2 && !isGuru ? (
+                <div className="mb-6 inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-rose-500/20 border border-rose-400/40 text-rose-300 text-xs md:text-sm font-bold">
+                  <Lock className="w-4 h-4 text-rose-400" />
+                  <span>Batas 2 dari 2 Kesempatan Telah Digunakan</span>
+                </div>
+              ) : (
+                <div className="mb-6 inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-blue-500/20 border border-blue-400/40 text-blue-300 text-xs md:text-sm font-bold">
+                  <History className="w-4 h-4 text-blue-400" />
+                  <span>
+                    {isGuru 
+                      ? 'Mode Guru (Bebas Mengulang Ujian)' 
+                      : `Percobaan ${attemptData.count} dari 2 Selesai • Tersisa 1 Kesempatan Lagi`}
+                  </span>
+                </div>
+              )}
+
+              {/* Rincian Skor */}
+              <div className="grid grid-cols-2 gap-3 max-w-md mx-auto mb-6 bg-slate-900/70 border border-indigo-900/60 p-4 rounded-2xl text-left">
+                <div className="bg-indigo-950/50 border border-indigo-800/40 p-3 rounded-xl">
+                  <p className="text-indigo-300 text-[11px] font-semibold uppercase tracking-wider mb-1">Pilihan Ganda</p>
+                  <p className="text-xl font-bold text-white">
+                    {scoreInfo.pg} <span className="text-xs font-normal text-indigo-400">/ {pgQuestions.length} Benar</span>
+                  </p>
+                </div>
+                <div className="bg-indigo-950/50 border border-indigo-800/40 p-3 rounded-xl">
+                  <p className="text-indigo-300 text-[11px] font-semibold uppercase tracking-wider mb-1">Isian Singkat</p>
+                  <p className="text-xl font-bold text-white">
+                    {scoreInfo.isian} <span className="text-xs font-normal text-indigo-400">/ {isianQuestions.length} Benar</span>
+                  </p>
+                </div>
+              </div>
+
+              {/* Status Penyimpanan */}
+              {saveStatus && (
+                <div className="mb-6 p-3 rounded-xl bg-indigo-950/80 border border-indigo-700/50 text-xs font-medium text-indigo-200 flex items-center justify-center gap-2 max-w-md mx-auto">
+                  {isSaving && <div className="w-3.5 h-3.5 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin" />}
+                  <span>{saveStatus}</span>
+                </div>
+              )}
+
+              <p className="text-[12px] text-indigo-300/80 mb-6 max-w-md mx-auto leading-relaxed">
+                🔒 Kunci jawaban disembunyikan demi menjaga integritas akademik ulangan harian. Skor dan hasil pengerjaanmu telah tersimpan.
+              </p>
+
+              {/* Tombol Aksi */}
+              <div className="flex flex-col sm:flex-row items-center justify-center gap-3 max-w-md mx-auto">
+                {attemptData.count >= 2 && !isGuru ? (
+                  <div className="w-full sm:w-auto px-5 py-3 bg-slate-800/80 text-slate-400 border border-slate-700/80 rounded-xl text-xs font-bold flex items-center justify-center gap-2 cursor-not-allowed">
+                    <Lock className="w-3.5 h-3.5" />
+                    <span>Kuota Ulangan Habis (2/2)</span>
+                  </div>
+                ) : (
+                  <button
+                    onClick={resetQuiz}
+                    className="w-full sm:w-auto px-6 py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-sm font-bold transition-all shadow-lg shadow-indigo-900/50 flex items-center justify-center gap-2 cursor-pointer"
+                  >
+                    <RotateCcw className="w-4 h-4" />
+                    <span>{isGuru ? 'Ulangi Tes (Mode Guru)' : 'Ulangi Tes (Kesempatan Terakhir: 2/2)'}</span>
+                  </button>
+                )}
+                
+                <button
+                  onClick={() => navigate('/')}
+                  className="w-full sm:w-auto px-6 py-3 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 rounded-xl text-sm font-bold transition-all flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <Home className="w-4 h-4" />
+                  <span>Kembali ke Beranda</span>
+                </button>
+
+                {attemptData.count >= 2 && !isGuru && (
+                  <button
+                    onClick={() => navigate(`/materi/${currentTopic.id}`)}
+                    className="w-full sm:w-auto px-6 py-3 bg-indigo-600/30 hover:bg-indigo-600/50 border border-indigo-400/40 text-indigo-200 rounded-xl text-sm font-bold transition-all flex items-center justify-center gap-2 cursor-pointer"
+                  >
+                    <BookOpen className="w-4 h-4" />
+                    <span>Pelajari Materi</span>
+                  </button>
+                )}
+              </div>
+
             </div>
           </div>
         </div>
-      )}
-
-      {/* Bagian A: Pilihan Ganda & Pilihan Ganda Kompleks */}
+      ) : (
+        <>
+          {/* Bagian A: Pilihan Ganda & Pilihan Ganda Kompleks */}
       <div className="mb-8">
         <div className="bg-slate-50 py-3.5 px-5 rounded-t-xl border border-slate-200 border-b-0 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
            <div>
@@ -884,7 +1233,6 @@ export default function Ulangan() {
         <div className="bg-white rounded-b-xl p-5 md:p-6 border border-slate-200 shadow-sm space-y-6">
            {pgQuestions.map((q, idx) => {
              const isKompleks = isPgKompleksQuestion(q);
-             const correctList = parseCorrectAnswers(q.answer, q.options || []);
              const userAnswer = answers[q.id];
              const userSelectedList = Array.isArray(userAnswer)
                ? userAnswer
@@ -937,7 +1285,6 @@ export default function Ulangan() {
                           const isSelected = isKompleks 
                             ? userSelectedList.includes(opt)
                             : userAnswer === opt;
-                          const isOptionInCorrectList = correctList.some(c => c.trim().toLowerCase() === opt.trim().toLowerCase());
 
                           return (
                             <div 
@@ -952,11 +1299,11 @@ export default function Ulangan() {
                               }}
                               className={`flex items-start gap-3 p-3 border rounded-xl cursor-pointer transition-all select-none ${
                                 submitted
-                                  ? (isOptionInCorrectList
-                                      ? 'bg-emerald-100/80 border-emerald-400 text-emerald-950 font-semibold'
-                                      : (isSelected
-                                          ? 'bg-rose-100/80 border-rose-400 text-rose-950 line-through'
-                                          : 'bg-white border-slate-200 opacity-60 text-slate-600'))
+                                  ? (isSelected
+                                      ? (isCorrect
+                                          ? 'bg-emerald-100/80 border-emerald-400 text-emerald-950 font-semibold'
+                                          : 'bg-rose-100/80 border-rose-400 text-rose-950 font-medium')
+                                      : 'bg-white border-slate-200 opacity-60 text-slate-600')
                                   : (isSelected
                                       ? 'bg-indigo-50 border-indigo-400 ring-2 ring-indigo-200 text-indigo-950 shadow-xs'
                                       : 'bg-white border-slate-200 hover:bg-slate-50 hover:border-slate-300 text-slate-700')
@@ -967,32 +1314,32 @@ export default function Ulangan() {
                                 {isKompleks ? (
                                   <div className={`w-5 h-5 rounded-md border flex items-center justify-center transition-all ${
                                     submitted
-                                      ? (isOptionInCorrectList
-                                          ? 'border-emerald-600 bg-emerald-600 text-white shadow-xs'
-                                          : (isSelected
-                                              ? 'border-rose-500 bg-rose-500 text-white shadow-xs'
-                                              : 'border-slate-300 bg-white'))
+                                      ? (isSelected
+                                          ? (isCorrect
+                                              ? 'border-emerald-600 bg-emerald-600 text-white shadow-xs'
+                                              : 'border-rose-500 bg-rose-500 text-white shadow-xs')
+                                          : 'border-slate-300 bg-white')
                                       : (isSelected
                                           ? 'border-indigo-600 bg-indigo-600 text-white shadow-xs scale-105'
                                           : 'border-slate-300 bg-white hover:border-slate-400')
                                   }`}>
-                                    {(isSelected || (submitted && isOptionInCorrectList)) && (
+                                    {isSelected && (
                                       <Check className="w-3.5 h-3.5 stroke-[3]" />
                                     )}
                                   </div>
                                 ) : (
                                   <div className={`w-5 h-5 rounded-full border flex items-center justify-center transition-all ${
                                     submitted
-                                      ? (isOptionInCorrectList
-                                          ? 'border-emerald-600 bg-emerald-600 text-white shadow-xs'
-                                          : (isSelected
-                                              ? 'border-rose-500 bg-rose-500 text-white shadow-xs'
-                                              : 'border-slate-300 bg-white'))
+                                      ? (isSelected
+                                          ? (isCorrect
+                                              ? 'border-emerald-600 bg-emerald-600 text-white shadow-xs'
+                                              : 'border-rose-500 bg-rose-500 text-white shadow-xs')
+                                          : 'border-slate-300 bg-white')
                                       : (isSelected
                                           ? 'border-indigo-600 bg-indigo-600 text-white shadow-xs'
                                           : 'border-slate-300 bg-white hover:border-slate-400')
                                   }`}>
-                                    {(isSelected || (submitted && isOptionInCorrectList)) && (
+                                    {isSelected && (
                                       <div className="w-2 h-2 rounded-full bg-white" />
                                     )}
                                   </div>
@@ -1005,37 +1352,27 @@ export default function Ulangan() {
                       </div>
                       
                       {submitted && (
-                         <div className={`mt-3.5 p-3 rounded-lg border text-xs ${
+                         <div className={`mt-3.5 p-2.5 rounded-lg border text-xs flex items-center justify-between ${
                            isCorrect 
                              ? 'bg-emerald-50 border-emerald-200 text-emerald-900' 
-                             : 'bg-white border-rose-200 text-slate-800'
+                             : 'bg-rose-50 border-rose-200 text-rose-900'
                          }`}>
-                           <div className="flex items-center gap-1.5 font-bold mb-1">
+                           <div className="flex items-center gap-1.5 font-bold">
                              {isCorrect ? (
-                               <span className="text-emerald-700 flex items-center gap-1">
+                               <span className="text-emerald-700 flex items-center gap-1.5">
                                  <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                                 Jawabanmu Benar!
+                                 Jawaban Benar
                                </span>
                              ) : (
-                               <span className="text-rose-600 flex items-center gap-1">
+                               <span className="text-rose-600 flex items-center gap-1.5">
                                  <AlertTriangle className="w-4 h-4 text-rose-500" />
                                  Jawaban Belum Tepat
                                </span>
                              )}
                            </div>
-                           <div className="mt-1">
-                             <span className="font-semibold text-slate-600">
-                               Kunci Jawaban ({isKompleks ? `${correctList.length} Pilihan Benar` : '1 Jawaban'}):
-                             </span>
-                             <div className="flex flex-wrap gap-1.5 mt-1.5">
-                               {correctList.map((ans, cIdx) => (
-                                 <span key={cIdx} className="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-100 text-emerald-800 rounded-md font-mono text-xs font-bold border border-emerald-200">
-                                   <Check className="w-3 h-3 text-emerald-600" />
-                                   {ans}
-                                 </span>
-                               ))}
-                             </div>
-                           </div>
+                           <span className="text-[11px] font-semibold text-slate-500">
+                             {userSelectedList.length > 0 ? `Jawabanmu: ${userSelectedList.join(', ')}` : 'Tidak dijawab'}
+                           </span>
                          </div>
                       )}
                     </div>
@@ -1087,10 +1424,20 @@ export default function Ulangan() {
                           }`}
                         />
 
-                        {submitted && !isCorrect && (
-                           <div className="mt-3 p-3 bg-white/60 border border-emerald-200 rounded-lg text-emerald-800 text-xs font-medium inline-block w-full max-w-xs">
-                             💡 Jawaban Benar: <strong className="font-mono text-sm">{q.answer}</strong>
-                           </div>
+                        {submitted && (
+                          <div className="mt-2.5 flex items-center gap-1.5 text-xs font-bold">
+                            {isCorrect ? (
+                              <span className="text-emerald-700 flex items-center gap-1.5">
+                                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                                Jawaban Benar
+                              </span>
+                            ) : (
+                              <span className="text-rose-600 flex items-center gap-1.5">
+                                <AlertTriangle className="w-4 h-4 text-rose-500" />
+                                Jawaban Belum Tepat
+                              </span>
+                            )}
+                          </div>
                         )}
                       </div>
                   </div>
@@ -1100,14 +1447,48 @@ export default function Ulangan() {
         </div>
       </div>
 
-      {!submitted && (
-        <div className="sticky bottom-6 flex justify-end">
-           <button 
-             onClick={handleSubmit} 
-             className="bg-indigo-600 text-white text-sm font-bold px-6 py-3 rounded-xl shadow-md hover:bg-indigo-700 transition-all w-full md:w-auto text-center"
-           >
-             Kumpulkan Jawaban
-           </button>
+          <div className="sticky bottom-6 flex justify-end">
+             <button 
+               onClick={handleSubmit} 
+               className="bg-indigo-600 text-white text-sm font-bold px-8 py-3.5 rounded-xl shadow-lg shadow-indigo-200 hover:bg-indigo-700 transition-all w-full md:w-auto text-center cursor-pointer flex items-center justify-center gap-2"
+             >
+               <CheckCircle2 className="w-4 h-4" />
+               <span>Kumpulkan Jawaban</span>
+             </button>
+          </div>
+        </>
+      )}
+
+      {/* Modal Peringatan Soal Belum Terisi (In-App React Modal, No window.confirm) */}
+      {showUnansweredModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/75 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 md:p-8 shadow-2xl border border-slate-200 text-center animate-in zoom-in-95 duration-200">
+            <div className="w-14 h-14 rounded-2xl bg-amber-100 border border-amber-200 text-amber-600 flex items-center justify-center mx-auto mb-4 shadow-sm">
+              <AlertTriangle className="w-7 h-7" />
+            </div>
+            <h3 className="text-lg font-bold text-slate-800 mb-2">
+              Masih Ada Soal Belum Terisi
+            </h3>
+            <p className="text-xs text-slate-600 mb-6 leading-relaxed">
+              Terdapat <strong className="text-indigo-600 font-bold">{unansweredCount} soal</strong> yang belum kamu jawab. Apakah kamu yakin ingin tetap mengumpulkan sekarang?
+            </p>
+            <div className="flex flex-col sm:flex-row items-center gap-2.5">
+              <button
+                type="button"
+                onClick={() => setShowUnansweredModal(false)}
+                className="w-full sm:flex-1 py-3 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition-colors cursor-pointer"
+              >
+                Periksa Soal Dulu
+              </button>
+              <button
+                type="button"
+                onClick={executeSubmit}
+                className="w-full sm:flex-1 py-3 px-4 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl transition-colors shadow-sm shadow-indigo-200 cursor-pointer"
+              >
+                Tetap Kumpulkan
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
