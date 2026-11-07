@@ -3,6 +3,7 @@ import { NavLink, Outlet, useParams, Link, useLocation, Navigate } from 'react-r
 import { BookOpen, Gamepad2, PenTool, GraduationCap, ArrowLeft, User as UserIcon, X, Home, ChevronRight, Loader2 } from 'lucide-react';
 import { topics } from '../lib/topics';
 import { useAuth } from '../lib/AuthContext';
+import StudentProfileMenu from './StudentProfileModal';
 
 const LOGO_SRC = "/logo.png";
 const LOGO_FALLBACK = "https://lh3.googleusercontent.com/d/1BnEiNri7kLjPFOUzKEAJaxnWwI1bTuNd";
@@ -82,15 +83,18 @@ export default function TopicLayout() {
           </div>
         </div>
 
-        {/* Tombol Cepat Kembali ke Beranda */}
-        <Link
-          to="/"
-          className="p-2 text-indigo-200 hover:text-white bg-indigo-800/60 hover:bg-indigo-800 rounded-lg transition-colors flex items-center gap-1 text-xs font-semibold"
-          title="Kembali ke Beranda"
-        >
-          <Home className="w-4 h-4" />
-          <span className="hidden xs:inline">Beranda</span>
-        </Link>
+        {/* Tombol Profil Siswa & Kembali ke Beranda */}
+        <div className="flex items-center gap-1.5 flex-shrink-0">
+          <StudentProfileMenu theme="dark" />
+          <Link
+            to="/"
+            className="p-1.5 text-indigo-200 hover:text-white bg-indigo-800/60 hover:bg-indigo-800 rounded-lg transition-colors flex items-center gap-1 text-xs font-semibold"
+            title="Kembali ke Beranda"
+          >
+            <Home className="w-4 h-4" />
+            <span className="hidden xs:inline">Beranda</span>
+          </Link>
+        </div>
       </header>
 
       {/* ======================================================== */}
@@ -261,19 +265,7 @@ export default function TopicLayout() {
             <span className="font-semibold text-sm line-clamp-1">{currentTopic.name}</span>
           </div>
           <div className="flex items-center space-x-4">
-            <div className="text-right">
-              <p className="text-[10px] text-slate-400 font-bold uppercase">Siswa</p>
-              <p className="text-sm font-bold text-indigo-600 line-clamp-1 max-w-[150px]">
-                {user?.fullName || (user as any)?.user_metadata?.full_name || user?.email || 'Tamu'}
-              </p>
-            </div>
-            <div className="w-10 h-10 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-600 font-bold overflow-hidden border border-indigo-200 shadow-sm">
-                {(user as any)?.user_metadata?.avatar_url ? (
-                  <img src={(user as any).user_metadata.avatar_url} alt="Profile" className="w-full h-full object-cover" />
-                ) : (
-                  <UserIcon className="w-5 h-5" />
-                )}
-            </div>
+            <StudentProfileMenu theme="light" />
           </div>
         </header>
 

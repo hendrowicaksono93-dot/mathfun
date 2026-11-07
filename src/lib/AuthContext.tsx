@@ -16,20 +16,44 @@ import {
 import { GoogleAuthProvider } from 'firebase/auth';
 import { appendStudentToSheet, setGoogleAccessToken } from './sheets';
 
+export const SMP_CLASSES = [
+  '7A', '7B', '7C', '7D', '7E', '7F', '7G', '7H', '7I',
+  '8A', '8B', '8C', '8D', '8E', '8F', '8G', '8H', '8I',
+  '9A', '9B', '9C', '9D', '9E', '9F', '9G', '9H', '9I',
+] as const;
+
+export type SmpClassType = typeof SMP_CLASSES[number];
+
+/**
+ * Combines Class and Student Name into format "KELAS_NAMA SISWA"
+ * without altering Google Spreadsheet columns.
+ */
+export function formatStudentNameWithClass(fullName: string, className?: string): string {
+  const cleanName = (fullName || 'Siswa').trim();
+  const cleanClass = (className || '').trim().toUpperCase();
+  if (!cleanClass) return cleanName;
+  if (cleanName.toUpperCase().startsWith(`${cleanClass}_`)) {
+    return cleanName;
+  }
+  return `${cleanClass}_${cleanName}`;
+}
+
 export interface UserProfile {
   uid: string;
   email: string;
   fullName: string;
+  className?: string;
 }
 
 interface AuthContextType {
   user: UserProfile | null;
   firebaseUser: FirebaseUser | null;
   loading: boolean;
-  signUp: (email: string, password: string, fullName: string) => Promise<void>;
+  signUp: (email: string, password: string, fullName: string, className?: string) => Promise<void>;
   signIn: (email: string, password: string) => Promise<void>;
   signInWithGoogle: () => Promise<void>;
   signOut: () => Promise<void>;
+  updateProfile: (fullName: string, className: string) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -55,6 +79,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               uid: fbUser.uid,
               email: fbUser.email || data.email || '',
               fullName: data.fullName || fbUser.displayName || 'Siswa',
+              className: data.className || '',
             });
           } else {
             // Fallback profile if Firestore doc doesn't exist yet
@@ -62,6 +87,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               uid: fbUser.uid,
               email: fbUser.email || '',
               fullName: fbUser.displayName || fbUser.email?.split('@')[0] || 'Siswa',
+              className: '',
             };
             setUser(newProfile);
             // Create user document in Firebase Firestore
@@ -122,9 +148,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   // 1. Pendaftaran Siswa (Register) -> Simpan di Firebase Firestore & Google Spreadsheet
-  const signUp = async (email: string, password: string, fullName: string) => {
+  const signUp = async (email: string, password: string, fullName: string, className?: string) => {
     const cleanEmail = email.trim().toLowerCase();
     const cleanName = fullName.trim() || cleanEmail.split('@')[0];
+    const cleanClass = (className || '').trim().toUpperCase();
 
     try {
       const res = await createUserWithEmailAndPassword(auth, cleanEmail, password);
@@ -134,6 +161,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         uid,
         email: cleanEmail,
         fullName: cleanName,
+        className: cleanClass,
         createdAt: new Date().toISOString(),
       };
 
@@ -144,14 +172,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         console.warn('Simpan Firestore offline/tertunda:', fsErr);
       }
 
-      const activeProfile: UserProfile = { uid, email: cleanEmail, fullName: cleanName };
+      const activeProfile: UserProfile = { uid, email: cleanEmail, fullName: cleanName, className: cleanClass };
       saveLocalAccount(activeProfile, password);
       setUser(activeProfile);
 
-      // Simpan data pendaftaran ke Google Spreadsheet
+      // Simpan data pendaftaran ke Google Spreadsheet (Format: KELAS_NAMA SISWA)
       try {
+        const formattedName = formatStudentNameWithClass(cleanName, cleanClass);
         await appendStudentToSheet({
-          fullName: cleanName,
+          fullName: formattedName,
           email: cleanEmail,
           createdAt: new Date().toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' }),
         });
@@ -166,7 +195,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         try {
           const signInRes = await signInWithEmailAndPassword(auth, cleanEmail, password);
           const uid = signInRes.user.uid;
-          const activeProfile: UserProfile = { uid, email: cleanEmail, fullName: cleanName };
+          const activeProfile: UserProfile = { uid, email: cleanEmail, fullName: cleanName, className: cleanClass };
           saveLocalAccount(activeProfile, password);
           setUser(activeProfile);
           return;
@@ -182,6 +211,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           uid: fallbackUid,
           email: cleanEmail,
           fullName: cleanName,
+          className: cleanClass,
           createdAt: new Date().toISOString(),
         };
 
@@ -191,13 +221,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           console.warn('Firestore fallback user save:', fsErr);
         }
 
-        const activeProfile: UserProfile = { uid: fallbackUid, email: cleanEmail, fullName: cleanName };
+        const activeProfile: UserProfile = { uid: fallbackUid, email: cleanEmail, fullName: cleanName, className: cleanClass };
         saveLocalAccount(activeProfile, password);
         setUser(activeProfile);
 
         try {
+          const formattedName = formatStudentNameWithClass(cleanName, cleanClass);
           await appendStudentToSheet({
-            fullName: cleanName,
+            fullName: formattedName,
             email: cleanEmail,
             createdAt: new Date().toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' }),
           });
@@ -228,6 +259,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         uid,
         email: cleanEmail,
         fullName: res.user.displayName || cleanEmail.split('@')[0],
+        className: '',
       };
 
       try {
@@ -238,6 +270,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             uid,
             email: data.email || cleanEmail,
             fullName: data.fullName || userProfile.fullName,
+            className: data.className || '',
           };
         }
       } catch (fsErr) {
@@ -353,6 +386,66 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  // 4. Update Profil Siswa (Nama & Kelas) -> Simpan di Firebase Firestore & Google Spreadsheet
+  const updateProfile = async (newFullName: string, newClassName: string) => {
+    if (!user) throw new Error('Tidak ada akun siswa yang sedang aktif.');
+    const cleanName = newFullName.trim() || user.fullName;
+    const cleanClass = newClassName.trim().toUpperCase();
+
+    const updatedProfile: UserProfile = {
+      ...user,
+      fullName: cleanName,
+      className: cleanClass,
+    };
+
+    // 1. Simpan ke Firebase Firestore
+    try {
+      await setDoc(
+        doc(db, 'users', user.uid),
+        {
+          uid: user.uid,
+          email: user.email,
+          fullName: cleanName,
+          className: cleanClass,
+          updatedAt: new Date().toISOString(),
+        },
+        { merge: true }
+      );
+    } catch (fsErr) {
+      console.warn('Gagal update profile di Firestore:', fsErr);
+    }
+
+    // 2. Simpan ke Local Storage
+    localStorage.setItem('mathfun_active_user', JSON.stringify(updatedProfile));
+    try {
+      const stored = localStorage.getItem('mathfun_registered_users');
+      if (stored) {
+        const list = JSON.parse(stored);
+        if (list[user.email.toLowerCase()]) {
+          list[user.email.toLowerCase()].profile = updatedProfile;
+          localStorage.setItem('mathfun_registered_users', JSON.stringify(list));
+        }
+      }
+    } catch (e) {
+      console.warn(e);
+    }
+
+    // 3. Update React State
+    setUser(updatedProfile);
+
+    // 4. Sinkronkan nama berformat KELAS_NAMA SISWA ke Google Spreadsheet
+    try {
+      const formattedName = formatStudentNameWithClass(cleanName, cleanClass);
+      await appendStudentToSheet({
+        fullName: formattedName,
+        email: user.email,
+        createdAt: new Date().toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' }),
+      });
+    } catch (sheetErr) {
+      console.warn('Gagal update nama siswa ke spreadsheet:', sheetErr);
+    }
+  };
+
   const signOut = async () => {
     try {
       await firebaseSignOut(auth);
@@ -363,7 +456,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, firebaseUser, loading, signUp, signIn, signInWithGoogle, signOut }}>
+    <AuthContext.Provider value={{ user, firebaseUser, loading, signUp, signIn, signInWithGoogle, signOut, updateProfile }}>
       {children}
     </AuthContext.Provider>
   );

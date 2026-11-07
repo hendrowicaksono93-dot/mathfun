@@ -2,7 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowRight, Search, Menu, BookOpen, LogOut, Trophy, User as UserIcon, FileSpreadsheet, Settings, Plus, CheckCircle, KeyRound, Lock, Code, Copy, Check } from 'lucide-react';
 import { topics } from '../lib/topics';
-import { useAuth } from '../lib/AuthContext';
+import { useAuth, SMP_CLASSES } from '../lib/AuthContext';
+import StudentProfileMenu from '../components/StudentProfileModal';
 import { db, collection, getDocs } from '../lib/firebase';
 import { syncBankSoalFromSheetToFirebase, getAppConfigFromFirestore, saveAppConfigToFirestore } from '../lib/bankSoalService';
 import { 
@@ -360,6 +361,7 @@ export default function Home() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
+  const [registerClass, setRegisterClass] = useState('');
   const [authError, setAuthError] = useState('');
   const [authSubmitting, setAuthSubmitting] = useState(false);
 
@@ -485,7 +487,7 @@ export default function Home() {
     setAuthSubmitting(true);
     try {
       if (isRegister) {
-        await signUp(email, password, fullName);
+        await signUp(email, password, fullName, registerClass);
       } else {
         await signIn(email, password);
       }
@@ -516,6 +518,7 @@ export default function Home() {
     setEmail('');
     setPassword('');
     setFullName('');
+    setRegisterClass('');
     setAuthError('');
   };
 
@@ -660,15 +663,7 @@ export default function Home() {
 
                {!authLoading && (
                  user ? (
-                   <div className="flex items-center gap-3">
-                     <span className="text-xs text-indigo-300 truncate max-w-[120px]">{user.fullName || user.email}</span>
-                     <button onClick={signOut} className="p-1 px-3 bg-red-500/20 text-red-300 rounded-lg hover:bg-red-500/30 transition-colors text-xs flex items-center gap-1">
-                        <LogOut className="w-3 h-3" /> Keluar
-                     </button>
-                     <div className="w-8 h-8 bg-indigo-600 rounded-full flex items-center justify-center text-white font-bold border border-indigo-500 overflow-hidden shadow-sm">
-                        <UserIcon className="w-4 h-4" />
-                     </div>
-                   </div>
+                   <StudentProfileMenu theme="dark" />
                  ) : (
                    <button onClick={() => setShowAuthModal(true)} className="flex items-center gap-2 bg-white text-indigo-900 px-4 py-1.5 rounded-full font-bold hover:bg-indigo-100 transition-colors">
                       Login Siswa
@@ -874,17 +869,47 @@ export default function Home() {
 
                  <form onSubmit={handleAuth} className="space-y-3.5">
                     {isRegister && (
-                      <div>
-                        <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">Nama Lengkap Siswa</label>
-                        <input 
-                          type="text" 
-                          required 
-                          value={fullName}
-                          onChange={(e) => setFullName(e.target.value)}
-                          className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all outline-none text-slate-800 text-sm font-medium"
-                          placeholder="Nama lengkap sesuai absensi kelas"
-                        />
-                      </div>
+                      <>
+                        <div>
+                          <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">Nama Lengkap Siswa <span className="text-rose-500">*</span></label>
+                          <input 
+                            type="text" 
+                            required 
+                            value={fullName}
+                            onChange={(e) => setFullName(e.target.value)}
+                            className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all outline-none text-slate-800 text-sm font-medium"
+                            placeholder="Nama lengkap sesuai absensi kelas"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">Pilih Kelas Siswa (7A - 9I)</label>
+                          <select 
+                            value={registerClass}
+                            onChange={(e) => setRegisterClass(e.target.value)}
+                            className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all outline-none text-slate-800 text-sm font-semibold cursor-pointer"
+                          >
+                            <option value="">-- Pilih Kelas (Bisa diatur nanti di Profil) --</option>
+                            <optgroup label="── Kelas 7 (VII) ──">
+                              {SMP_CLASSES.filter(c => c.startsWith('7')).map(c => (
+                                <option key={c} value={c}>Kelas {c}</option>
+                              ))}
+                            </optgroup>
+                            <optgroup label="── Kelas 8 (VIII) ──">
+                              {SMP_CLASSES.filter(c => c.startsWith('8')).map(c => (
+                                <option key={c} value={c}>Kelas {c}</option>
+                              ))}
+                            </optgroup>
+                            <optgroup label="── Kelas 9 (IX) ──">
+                              {SMP_CLASSES.filter(c => c.startsWith('9')).map(c => (
+                                <option key={c} value={c}>Kelas {c}</option>
+                              ))}
+                            </optgroup>
+                          </select>
+                          <p className="text-[10px] text-slate-500 mt-1">
+                            Format database: <code>{registerClass ? `${registerClass}_${fullName || 'Nama'}` : 'KELAS_NAMA SISWA'}</code>
+                          </p>
+                        </div>
+                      </>
                     )}
                     <div>
                       <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">Alamat Email</label>

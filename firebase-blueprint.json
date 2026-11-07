@@ -8,7 +8,9 @@
         "uid": { "type": "string" },
         "email": { "type": "string" },
         "fullName": { "type": "string" },
-        "createdAt": { "type": "string" }
+        "className": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
       },
       "required": ["uid", "email", "fullName"]
     },

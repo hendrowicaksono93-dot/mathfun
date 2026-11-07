@@ -526,7 +526,11 @@ export async function syncAllFirestoreDataToSpreadsheet(customScriptUrl?: string
     let userCount = 0;
     for (const docSnap of usersSnap.docs) {
       const u = docSnap.data();
-      const fullName = u.fullName || 'Siswa Anonim';
+      const rawName = u.fullName || 'Siswa Anonim';
+      const className = u.className ? String(u.className).trim().toUpperCase() : '';
+      const fullName = className && !rawName.toUpperCase().startsWith(`${className}_`)
+        ? `${className}_${rawName}`
+        : rawName;
       const email = u.email || '-';
       const createdAt = u.createdAt 
         ? new Date(u.createdAt).toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' }) 

@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import confetti from 'canvas-confetti';
 import { KeyRound, Lock, ShieldAlert, ShieldCheck, ArrowLeft, CheckCircle2, AlertTriangle, EyeOff, CameraOff, Check, CheckSquare, Circle, Square, Trophy, RotateCcw, Home, BookOpen, History, RefreshCw, UserCheck } from 'lucide-react';
 import { db, collection, addDoc } from '../lib/firebase';
-import { useAuth } from '../lib/AuthContext';
+import { useAuth, formatStudentNameWithClass } from '../lib/AuthContext';
 import QuestionImage from '../components/QuestionImage';
 import { appendScoreToSheet, getUlanganPin, getGuruPin, getScriptUrl, setScriptUrl, getTopicPinsFromStorage, setTopicPinInStorage } from '../lib/sheets';
 import { getUserAttemptData, recordUserAttempt, resetUserAttempts, UserAttemptData } from '../lib/attemptService';
@@ -617,7 +617,8 @@ export default function Ulangan() {
       setIsSaving(true);
       setSaveStatus('Menyimpan nilai ke Firebase Firestore...');
       
-      const name = user?.fullName || 'Siswa Anonim';
+      const rawName = user?.fullName || 'Siswa Anonim';
+      const name = formatStudentNameWithClass(rawName, user?.className);
       const email = user?.email || 'siswa@example.com';
       const nowStr = new Date().toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' });
 
@@ -626,6 +627,7 @@ export default function Ulangan() {
         await addDoc(collection(db, 'scores'), {
           userId: user?.uid || null,
           fullName: name,
+          className: user?.className || '',
           email: email,
           topicId: topicId,
           topicName: currentTopic.name,
