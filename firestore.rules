@@ -15,6 +15,11 @@ service cloud.firestore {
       allow create, update: if true;
     }
 
+    match /user_accounts/{accountId} {
+      allow read: if true;
+      allow create, update: if true;
+    }
+
     match /scores/{scoreId} {
       allow read: if true;
       allow create, update: if true;
@@ -32,7 +37,7 @@ service cloud.firestore {
 
     match /user_attempts/{attemptId} {
       allow read: if true;
-      allow create, update: if true;
+      allow create, update, delete: if true;
     }
 
     match /{document=**} {

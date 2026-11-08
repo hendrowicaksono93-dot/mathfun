@@ -608,3 +608,86 @@ export async function syncAllFirestoreDataToSpreadsheet(customScriptUrl?: string
     };
   }
 }
+
+/**
+ * Appends student attempt log to the new Spreadsheet tab "Data Percobaan Siswa"
+ */
+export async function appendAttemptToSheet(data: {
+  fullName: string;
+  email: string;
+  topicId: string;
+  topicName: string;
+  attemptNumber: number;
+  score: number;
+  statusQuota: string;
+  note?: string;
+  createdAt: string;
+}): Promise<{ success: boolean; message: string }> {
+  const scriptUrl = await resolveScriptUrl();
+  if (!scriptUrl) {
+    return { success: false, message: 'Apps Script Webhook URL belum diatur' };
+  }
+
+  try {
+    await fetch(scriptUrl, {
+      method: 'POST',
+      mode: 'no-cors',
+      headers: { 'Content-Type': 'text/plain' },
+      body: JSON.stringify({
+        action: 'record_attempt',
+        fullName: data.fullName,
+        email: data.email,
+        topicId: data.topicId,
+        topicName: data.topicName,
+        attemptNumber: data.attemptNumber,
+        score: data.score,
+        statusQuota: data.statusQuota,
+        note: data.note || 'Selesai Mengerjakan',
+        createdAt: data.createdAt,
+      }),
+    });
+    return { success: true, message: 'Log percobaan tersimpan di tab "Data Percobaan Siswa"!' };
+  } catch (err: any) {
+    console.warn('Gagal appendAttemptToSheet:', err);
+    return { success: false, message: err.message || 'Gagal menyimpan log percobaan ke spreadsheet.' };
+  }
+}
+
+/**
+ * Appends teacher reset audit log to the Spreadsheet tab "Data Percobaan Siswa"
+ */
+export async function appendResetAttemptToSheet(data: {
+  fullName: string;
+  email: string;
+  topicId: string;
+  topicName: string;
+  resetBy: string;
+  createdAt: string;
+}): Promise<{ success: boolean; message: string }> {
+  const scriptUrl = await resolveScriptUrl();
+  if (!scriptUrl) {
+    return { success: false, message: 'Apps Script Webhook URL belum diatur' };
+  }
+
+  try {
+    await fetch(scriptUrl, {
+      method: 'POST',
+      mode: 'no-cors',
+      headers: { 'Content-Type': 'text/plain' },
+      body: JSON.stringify({
+        action: 'reset_student_attempt',
+        fullName: data.fullName,
+        email: data.email,
+        topicId: data.topicId,
+        topicName: data.topicName,
+        resetBy: data.resetBy,
+        createdAt: data.createdAt,
+      }),
+    });
+    return { success: true, message: 'Reset percobaan dicatat di tab "Data Percobaan Siswa"!' };
+  } catch (err: any) {
+    console.warn('Gagal appendResetAttemptToSheet:', err);
+    return { success: false, message: err.message || 'Gagal mencatat reset percobaan.' };
+  }
+}
+

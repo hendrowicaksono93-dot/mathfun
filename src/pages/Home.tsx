@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowRight, Search, Menu, BookOpen, LogOut, Trophy, User as UserIcon, FileSpreadsheet, Settings, Plus, CheckCircle, KeyRound, Lock, Code, Copy, Check } from 'lucide-react';
+import { ArrowRight, Search, Menu, BookOpen, LogOut, Trophy, User as UserIcon, FileSpreadsheet, Settings, Plus, CheckCircle, KeyRound, Lock, Code, Copy, Check, UserCheck, RefreshCw, AlertTriangle, Filter } from 'lucide-react';
 import { topics } from '../lib/topics';
 import { useAuth, SMP_CLASSES } from '../lib/AuthContext';
 import StudentProfileMenu from '../components/StudentProfileModal';
@@ -19,6 +19,12 @@ import {
   setUlanganPin,
   syncAllFirestoreDataToSpreadsheet
 } from '../lib/sheets';
+import { 
+  getAllStudentAttempts, 
+  resetUserAttempts, 
+  adjustStudentAttempt, 
+  StudentAttemptSummary 
+} from '../lib/attemptService';
 
 interface LeaderboardEntry {
   full_name: string;
@@ -126,6 +132,15 @@ function setup() {
     }
   }
 
+  // F. Setup Sheet "Data Percobaan Siswa" (Pencatatan Akses & Reset Ujian Max 2x)
+  var sheetPercobaan = ss.getSheetByName("Data Percobaan Siswa");
+  if (!sheetPercobaan) { sheetPercobaan = ss.insertSheet("Data Percobaan Siswa"); }
+  if (sheetPercobaan.getLastRow() === 0) {
+    sheetPercobaan.appendRow(["Nama Siswa", "Email Siswa", "Materi / Bab", "Percobaan Ke-", "Waktu Pengerjaan", "Keterangan"]);
+    sheetPercobaan.getRange(1, 1, 1, 6).setFontWeight("bold").setBackground("#fef08a").setFontColor("#854d0e");
+    sheetPercobaan.setFrozenRows(1);
+  }
+
   Logger.log("✅ Setup berhasil!");
 }
 
@@ -189,6 +204,36 @@ function doPost(e) {
             break;
           }
         }
+      }
+    }
+
+    // 5. CATAT PERCOBAAN ULANGAN SISWA (Max 2x per Bab)
+    else if (data.action === "record_attempt") {
+      var sheetPercobaan = ss.getSheetByName("Data Percobaan Siswa");
+      if (sheetPercobaan) {
+        sheetPercobaan.appendRow([
+          data.userName || data.fullName || "Siswa",
+          data.email || "-",
+          data.topicName || data.topicId || "-",
+          data.attemptNumber || 1,
+          data.timestamp || new Date().toLocaleString("id-ID"),
+          data.note || "Mengerjakan Ulangan Harian"
+        ]);
+      }
+    }
+
+    // 6. CATAT RESET PERCOBAAN SISWA OLEH GURU
+    else if (data.action === "reset_student_attempt") {
+      var sheetPercobaan = ss.getSheetByName("Data Percobaan Siswa");
+      if (sheetPercobaan) {
+        sheetPercobaan.appendRow([
+          data.userName || data.fullName || "Siswa",
+          data.email || "-",
+          data.topicName || data.topicId || "Semua Materi",
+          "0 (RESET)",
+          new Date().toLocaleString("id-ID"),
+          data.note || ("Direset oleh Guru (" + (data.adminName || "Guru") + ")")
+        ]);
       }
     }
 
@@ -349,7 +394,7 @@ function doGet(e) {
 
 export default function Home() {
   const navigate = useNavigate();
-  const { user, signIn, signUp, signInWithGoogle, signOut, loading: authLoading } = useAuth();
+  const { user, signIn, signUp, signInWithGoogle, signOut, sendResetPassword, resetPasswordDirectly, loading: authLoading } = useAuth();
   const [searchTerm, setSearchTerm] = useState('');
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
   const [loadingLeaderboard, setLoadingLeaderboard] = useState(true);
@@ -358,11 +403,15 @@ export default function Home() {
   // Auth Form State
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [isRegister, setIsRegister] = useState(false);
+  const [isForgotPassword, setIsForgotPassword] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [resetNewPassword, setResetNewPassword] = useState('');
+  const [resetConfirmPassword, setResetConfirmPassword] = useState('');
   const [fullName, setFullName] = useState('');
   const [registerClass, setRegisterClass] = useState('');
   const [authError, setAuthError] = useState('');
+  const [authSuccessMsg, setAuthSuccessMsg] = useState('');
   const [authSubmitting, setAuthSubmitting] = useState(false);
 
   // Guru / Admin Access Modal & States
@@ -383,6 +432,59 @@ export default function Home() {
   const [syncingFirestoreToSheet, setSyncingFirestoreToSheet] = useState(false);
   const [showCodeModal, setShowCodeModal] = useState(false);
   const [copiedCode, setCopiedCode] = useState(false);
+
+  // Guru Attempts Management State (Max 2x per materi)
+  const [guruTab, setGuruTab] = useState<'sheets' | 'attempts'>('sheets');
+  const [studentAttempts, setStudentAttempts] = useState<StudentAttemptSummary[]>([]);
+  const [loadingAttempts, setLoadingAttempts] = useState<boolean>(false);
+  const [attemptFilterTopic, setAttemptFilterTopic] = useState<string>('');
+  const [attemptFilterSearch, setAttemptFilterSearch] = useState<string>('');
+  const [quickResetEmail, setQuickResetEmail] = useState<string>('');
+  const [quickResetTopic, setQuickResetTopic] = useState<string>(topics[0]?.id || 'bilangan-bulat');
+  const [attemptActionMsg, setAttemptActionMsg] = useState<string>('');
+
+  const fetchAllAttempts = async () => {
+    setLoadingAttempts(true);
+    try {
+      const list = await getAllStudentAttempts();
+      setStudentAttempts(list);
+    } catch (err) {
+      console.error('Failed to fetch student attempts:', err);
+    } finally {
+      setLoadingAttempts(false);
+    }
+  };
+
+  const handleResetAttemptForStudent = async (email: string, uid: string, topicId: string, studentName?: string) => {
+    setAttemptActionMsg(`🔄 Mereset percobaan untuk ${studentName || email}...`);
+    try {
+      await resetUserAttempts(email, uid, topicId, scriptUrlInput);
+      setAttemptActionMsg(`✅ Percobaan untuk ${studentName || email} berhasil direset! Siswa dapat mengerjakan 2x lagi.`);
+      await fetchAllAttempts();
+      setTimeout(() => setAttemptActionMsg(''), 5000);
+    } catch (err: any) {
+      setAttemptActionMsg(`❌ Gagal mereset: ${err?.message || 'Terjadi kesalahan'}`);
+    }
+  };
+
+  const handleQuickResetSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanMail = quickResetEmail.trim();
+    if (!cleanMail) {
+      setAttemptActionMsg('⚠️ Masukkan email siswa untuk reset.');
+      return;
+    }
+    setAttemptActionMsg(`🔄 Memproses reset percobaan untuk ${cleanMail}...`);
+    try {
+      await resetUserAttempts(cleanMail, '', quickResetTopic, scriptUrlInput);
+      setAttemptActionMsg(`✅ Berhasil mereset percobaan untuk ${cleanMail} pada materi terpilih!`);
+      setQuickResetEmail('');
+      await fetchAllAttempts();
+      setTimeout(() => setAttemptActionMsg(''), 5000);
+    } catch (err: any) {
+      setAttemptActionMsg(`❌ Gagal: ${err?.message || 'Terjadi kesalahan'}`);
+    }
+  };
 
   // Otomatis buka modal login jika siswa belum masuk
   useEffect(() => {
@@ -428,6 +530,7 @@ export default function Home() {
       setGuruPinSettingInput(getGuruPin());
       setUlanganPinSettingInput(getUlanganPin());
       setShowSheetModal(true);
+      fetchAllAttempts();
     } else {
       setGuruPassInput('');
       setGuruPassError('');
@@ -448,6 +551,7 @@ export default function Home() {
       setGuruPinSettingInput(getGuruPin());
       setUlanganPinSettingInput(getUlanganPin());
       setShowSheetModal(true);
+      fetchAllAttempts();
     } else {
       setGuruPassError('Kata kunci / PIN salah.');
     }
@@ -517,9 +621,76 @@ export default function Home() {
   const resetAuthForm = () => {
     setEmail('');
     setPassword('');
+    setResetNewPassword('');
+    setResetConfirmPassword('');
     setFullName('');
     setRegisterClass('');
     setAuthError('');
+    setAuthSuccessMsg('');
+    setIsForgotPassword(false);
+  };
+
+  const handleSendResetEmail = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAuthError('');
+    setAuthSuccessMsg('');
+    const cleanEmail = email.trim();
+    if (!cleanEmail) {
+      setAuthError('Silakan masukkan alamat email akun Anda.');
+      return;
+    }
+    setAuthSubmitting(true);
+    try {
+      const res = await sendResetPassword(cleanEmail);
+      if (res.success) {
+        setAuthSuccessMsg(res.message);
+      } else {
+        setAuthError(res.message);
+      }
+    } catch (err: any) {
+      setAuthError(err.message || 'Gagal mengirim email reset kata sandi.');
+    } finally {
+      setAuthSubmitting(false);
+    }
+  };
+
+  const handleDirectPasswordReset = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAuthError('');
+    setAuthSuccessMsg('');
+    const cleanEmail = email.trim();
+    const cleanNewPass = resetNewPassword.trim();
+    const cleanConfirmPass = resetConfirmPassword.trim();
+
+    if (!cleanEmail) {
+      setAuthError('Silakan masukkan alamat email akun Anda.');
+      return;
+    }
+    if (!cleanNewPass || cleanNewPass.length < 6) {
+      setAuthError('Kata sandi baru minimal 6 karakter.');
+      return;
+    }
+    if (cleanNewPass !== cleanConfirmPass) {
+      setAuthError('Konfirmasi kata sandi tidak cocok. Harap periksa kembali.');
+      return;
+    }
+
+    setAuthSubmitting(true);
+    try {
+      const res = await resetPasswordDirectly(cleanEmail, cleanNewPass);
+      if (res.success) {
+        setAuthSuccessMsg(res.message);
+        setPassword(cleanNewPass);
+        setResetNewPassword('');
+        setResetConfirmPassword('');
+      } else {
+        setAuthError(res.message);
+      }
+    } catch (err: any) {
+      setAuthError(err.message || 'Gagal mereset kata sandi.');
+    } finally {
+      setAuthSubmitting(false);
+    }
   };
 
   const fetchLeaderboard = async () => {
@@ -824,6 +995,134 @@ export default function Home() {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-md animate-in fade-in duration-300">
            <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300 border border-slate-100">
               <div className="p-6 sm:p-8">
+                {isForgotPassword ? (
+                  <div>
+                    <div className="flex justify-between items-start mb-4">
+                      <div>
+                        <div className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-amber-50 border border-amber-200 rounded-lg text-amber-800 text-xs font-bold mb-2">
+                          <span>🔑 Pemulihan Sandi Siswa</span>
+                        </div>
+                        <h2 className="text-2xl font-black text-slate-800 tracking-tight">
+                          Lupa Kata Sandi?
+                        </h2>
+                        <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                          Pilih metode reset: Buat kata sandi baru langsung atau kirim tautan ke email Anda.
+                        </p>
+                      </div>
+                      <button 
+                        type="button"
+                        onClick={() => { setIsForgotPassword(false); setAuthError(''); setAuthSuccessMsg(''); }} 
+                        className="text-slate-400 hover:text-slate-600 w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center transition-colors font-bold cursor-pointer"
+                      >
+                        ✕
+                      </button>
+                    </div>
+
+                    {authSuccessMsg && (
+                      <div className="text-xs bg-emerald-50 p-3.5 rounded-xl border border-emerald-200 text-emerald-900 mb-4 flex items-start gap-2">
+                        <span className="text-base leading-none">✅</span>
+                        <div className="flex-1 font-medium leading-relaxed">{authSuccessMsg}</div>
+                      </div>
+                    )}
+
+                    {authError && (
+                      <div className="text-xs bg-rose-50 p-3.5 rounded-xl border border-rose-200 text-rose-900 mb-4 flex items-start gap-2">
+                        <span className="text-base leading-none">⚠️</span>
+                        <div className="flex-1 font-medium leading-relaxed">{authError}</div>
+                      </div>
+                    )}
+
+                    {/* Opsi 1: Reset Kata Sandi Baru Langsung */}
+                    <div className="bg-slate-50 border border-indigo-100 rounded-2xl p-4 mb-4">
+                      <div className="flex items-center gap-2 mb-1.5">
+                        <span className="w-5 h-5 rounded-full bg-indigo-600 text-white flex items-center justify-center text-xs font-bold">1</span>
+                        <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider">
+                          Reset Langsung (Paling Praktis Siswa)
+                        </h3>
+                      </div>
+                      <p className="text-[11px] text-slate-500 mb-3 leading-relaxed">
+                        Langsung buat kata sandi baru tanpa perlu membuka kotak masuk email di sekolah/HP.
+                      </p>
+
+                      <form onSubmit={handleDirectPasswordReset} className="space-y-3">
+                        <div>
+                          <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">Email Siswa Terdaftar</label>
+                          <input 
+                            type="email"
+                            required
+                            value={email}
+                            onChange={(e) => setEmail(e.target.value)}
+                            placeholder="siswa@example.com"
+                            className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-indigo-500 outline-none text-slate-800 font-medium"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">Kata Sandi Baru</label>
+                          <input 
+                            type="password"
+                            required
+                            minLength={6}
+                            value={resetNewPassword}
+                            onChange={(e) => setResetNewPassword(e.target.value)}
+                            placeholder="Minimal 6 karakter"
+                            className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-indigo-500 outline-none text-slate-800 font-medium"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">Konfirmasi Kata Sandi Baru</label>
+                          <input 
+                            type="password"
+                            required
+                            minLength={6}
+                            value={resetConfirmPassword}
+                            onChange={(e) => setResetConfirmPassword(e.target.value)}
+                            placeholder="Ketik ulang kata sandi baru"
+                            className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-indigo-500 outline-none text-slate-800 font-medium"
+                          />
+                        </div>
+                        <button
+                          type="submit"
+                          disabled={authSubmitting}
+                          className="w-full py-2.5 px-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-md shadow-indigo-200 transition-all disabled:opacity-50 cursor-pointer"
+                        >
+                          {authSubmitting ? 'Menyimpan...' : '💾 Simpan Kata Sandi Baru'}
+                        </button>
+                      </form>
+                    </div>
+
+                    {/* Opsi 2: Kirim Link ke Email */}
+                    <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4">
+                      <div className="flex items-center gap-2 mb-1.5">
+                        <span className="w-5 h-5 rounded-full bg-slate-500 text-white flex items-center justify-center text-xs font-bold">2</span>
+                        <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider">
+                          Kirim Link Pemulihan ke Email (Firebase)
+                        </h3>
+                      </div>
+                      <p className="text-[11px] text-slate-500 mb-3 leading-relaxed">
+                        Link resmi reset kata sandi Firebase akan dikirimkan ke email terdaftar Anda.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={handleSendResetEmail}
+                        disabled={authSubmitting || !email.trim()}
+                        className="w-full py-2 px-3 border border-slate-300 bg-white hover:bg-slate-100 text-slate-700 rounded-xl text-xs font-bold transition-all disabled:opacity-50 cursor-pointer flex items-center justify-center gap-1.5"
+                      >
+                        <span>✉️ {authSubmitting ? 'Mengirim...' : 'Kirim Link ke Email Siswa'}</span>
+                      </button>
+                    </div>
+
+                    <div className="mt-5 pt-4 border-t border-slate-100 text-center">
+                      <button
+                        type="button"
+                        onClick={() => { setIsForgotPassword(false); setAuthError(''); setAuthSuccessMsg(''); }}
+                        className="text-xs font-bold text-indigo-600 hover:underline cursor-pointer"
+                      >
+                        ← Kembali ke Form Masuk
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <>
                  <div className="flex justify-between items-start mb-4">
                     <div>
                       <div className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-indigo-50 border border-indigo-100 rounded-lg text-indigo-700 text-xs font-bold mb-2">
@@ -923,7 +1222,22 @@ export default function Home() {
                       />
                     </div>
                     <div>
-                      <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">Kata Sandi</label>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">Kata Sandi</label>
+                        {!isRegister && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setIsForgotPassword(true);
+                              setAuthError('');
+                              setAuthSuccessMsg('');
+                            }}
+                            className="text-xs text-indigo-600 font-bold hover:underline cursor-pointer"
+                          >
+                            Lupa Kata Sandi?
+                          </button>
+                        )}
+                      </div>
                       <input 
                         type="password" 
                         required 
@@ -965,18 +1279,43 @@ export default function Home() {
                           </div>
                         )}
 
+                        {/* If too-many-requests */}
+                        {authError.includes('too-many-requests') && (
+                          <div className="pt-1.5 border-t border-amber-200/60">
+                            <button
+                              type="button"
+                              onClick={handleGoogleAuth}
+                              className="w-full py-2 px-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold transition-colors shadow-sm flex items-center justify-center gap-2"
+                            >
+                              <span>🚀 Masuk dengan Akun Google (Bypass Proteksi Sandi)</span>
+                            </button>
+                          </div>
+                        )}
+
                         {/* If user not found / wrong password during Sign In */}
-                        {!isRegister && (authError.includes('belum pernah mendaftar') || authError.includes('tidak cocok') || authError.includes('Daftar di sini')) && (
-                          <div className="pt-1">
+                        {!isRegister && (authError.includes('belum pernah mendaftar') || authError.includes('tidak cocok') || authError.includes('Daftar di sini') || authError.includes('salah') || authError.includes('Sandi')) && (
+                          <div className="pt-1.5 flex gap-2">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setIsForgotPassword(true);
+                                setAuthError('');
+                                setAuthSuccessMsg('');
+                              }}
+                              className="flex-1 py-1.5 px-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-bold transition-colors shadow-sm text-center"
+                            >
+                              🔑 Reset Sandi
+                            </button>
                             <button
                               type="button"
                               onClick={() => {
                                 setIsRegister(true);
                                 setAuthError('');
+                                setAuthSuccessMsg('');
                               }}
-                              className="w-full py-1.5 px-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold transition-colors shadow-sm text-center"
+                              className="flex-1 py-1.5 px-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold transition-colors shadow-sm text-center"
                             >
-                              ✨ Buat Akun Baru dengan Email Ini
+                              ✨ Buat Akun Baru
                             </button>
                           </div>
                         )}
@@ -996,13 +1335,15 @@ export default function Home() {
                     <p className="text-slate-500 text-sm">
                       {isRegister ? 'Sudah punya akun?' : 'Belum punya akun?'}
                       <button 
-                        onClick={() => { setIsRegister(!isRegister); setAuthError(''); }}
+                        onClick={() => { setIsRegister(!isRegister); setAuthError(''); setAuthSuccessMsg(''); }}
                         className="ml-2 text-indigo-600 font-bold hover:underline"
                       >
                         {isRegister ? 'Masuk di sini' : 'Daftar di sini'}
                       </button>
                     </p>
                  </div>
+                  </>
+                )}
               </div>
            </div>
         </div>
@@ -1069,19 +1410,19 @@ export default function Home() {
         </div>
       )}
 
-      {/* Google Sheets Config Modal */}
+      {/* Google Sheets & Guru Controls Modal */}
       {showSheetModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-300">
-          <div className="bg-white w-full max-w-xl rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh] animate-in zoom-in-95 duration-300 border border-slate-100">
+          <div className="bg-white w-full max-w-2xl rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh] animate-in zoom-in-95 duration-300 border border-slate-100">
             {/* Modal Header */}
             <div className="p-5 sm:p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/70 flex-shrink-0">
-              <div className="flex items-center gap-2.5 text-emerald-700">
-                <div className="p-2 bg-emerald-100 rounded-xl text-emerald-700">
-                  <FileSpreadsheet className="w-5 h-5" />
+              <div className="flex items-center gap-2.5 text-slate-800">
+                <div className={`p-2 rounded-xl ${guruTab === 'sheets' ? 'bg-emerald-100 text-emerald-700' : 'bg-indigo-100 text-indigo-700'}`}>
+                  {guruTab === 'sheets' ? <FileSpreadsheet className="w-5 h-5" /> : <UserCheck className="w-5 h-5" />}
                 </div>
                 <div>
-                  <h2 className="text-lg font-bold text-slate-800">Pengaturan Guru & Spreadsheet</h2>
-                  <p className="text-[11px] text-slate-500">Konfigurasi database, sync soal, & PIN akses</p>
+                  <h2 className="text-lg font-bold text-slate-800">Panel Kendali Guru</h2>
+                  <p className="text-[11px] text-slate-500">Spreadsheet, PIN Soal, & Kelola Batasan Percobaan Siswa (Max 2x)</p>
                 </div>
               </div>
               <button 
@@ -1092,141 +1433,359 @@ export default function Home() {
               </button>
             </div>
 
-            {/* Scrollable Form Body */}
-            <form onSubmit={handleSaveSheetConfig} id="guru-sheet-form" className="overflow-y-auto p-5 sm:p-6 flex-1 space-y-4">
-              <p className="text-xs text-slate-600 leading-relaxed bg-emerald-50/60 border border-emerald-100 p-3 rounded-xl">
-                Aplikasi menyimpan data pendaftaran akun siswa dan hasil ujian ke <strong>Firebase Firestore</strong> dan <strong>Google Spreadsheet</strong> (kolom: Nama Akun, Email, Bab/Materi, Nilai).
-              </p>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                  Google Spreadsheet ID
-                </label>
-                <input 
-                  type="text"
-                  value={sheetIdInput}
-                  onChange={(e) => setSheetIdInput(e.target.value)}
-                  placeholder="Contoh: 1xABC123xyz_ID_dari_URL_spreadsheet"
-                  className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-mono focus:ring-2 focus:ring-emerald-500 outline-none text-slate-800"
-                />
-                <p className="text-[11px] text-slate-400 mt-1">
-                  Ambil ID dari URL: <code>https://docs.google.com/spreadsheets/d/<b>[SPREADSHEET_ID]</b>/edit</code>
-                </p>
-              </div>
-
-              <div>
-                <button
-                  type="button"
-                  onClick={handleAutoCreateSheet}
-                  disabled={creatingSheet}
-                  className="w-full py-2.5 px-4 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl text-xs font-bold hover:bg-emerald-100 transition-colors flex items-center justify-center gap-2"
-                >
-                  <Plus className="w-4 h-4" />
-                  <span>{creatingSheet ? 'Membuat Spreadsheet...' : 'Buat Spreadsheet "MathFun" Otomatis'}</span>
-                </button>
-              </div>
-
-              <div className="border-t border-slate-100 pt-4">
-                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                  Kode Akses / PIN Mode Guru (Pengaturan Keamanan)
-                </label>
-                <input 
-                  type="text"
-                  value={guruPinSettingInput}
-                  onChange={(e) => setGuruPinSettingInput(e.target.value)}
-                  placeholder="Contoh: guru123"
-                  className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-mono focus:ring-2 focus:ring-emerald-500 outline-none text-slate-800 font-bold"
-                />
-                <p className="text-[11px] text-slate-400 mt-1">
-                  PIN ini digunakan untuk membuka menu Akses Guru agar siswa tidak dapat mengubah Spreadsheet ID.
-                </p>
-              </div>
-
-              <div className="border-t border-slate-100 pt-4">
-                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                  PIN Akses Ujian / Ulangan Harian Siswa (Global)
-                </label>
-                <input 
-                  type="text"
-                  value={ulanganPinSettingInput}
-                  onChange={(e) => setUlanganPinSettingInput(e.target.value)}
-                  placeholder="Atur PIN khusus atau atur per bab di Spreadsheet"
-                  className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-mono focus:ring-2 focus:ring-indigo-500 outline-none text-indigo-900 font-bold"
-                />
-                <p className="text-[11px] text-slate-400 mt-1">
-                  PIN global ini opsional jika Anda sudah mengatur PIN khusus per bab pada sheet <code>Pengaturan PIN Soal</code> di Google Spreadsheet.
-                </p>
-              </div>
-
-              <div className="border-t border-slate-100 pt-4">
-                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                  Google Apps Script Web App URL (Webhook)
-                </label>
-                <input 
-                  type="text"
-                  value={scriptUrlInput}
-                  onChange={(e) => setScriptUrlInput(e.target.value)}
-                  placeholder="https://script.google.com/macros/s/.../exec"
-                  className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono focus:ring-2 focus:ring-emerald-500 outline-none text-slate-800"
-                />
-                
-                <div className="mt-3 space-y-2.5">
-                  <button
-                    type="button"
-                    onClick={() => setShowCodeModal(true)}
-                    className="w-full py-2.5 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-colors flex items-center justify-center gap-2 border border-slate-300"
-                  >
-                    <Code className="w-4 h-4 text-indigo-600" />
-                    <span>📋 Salin Kode Apps Script (Kode.gs) Terbaru</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={handleSyncBankSoal}
-                    disabled={syncingBankSoal || !scriptUrlInput}
-                    className="w-full py-2.5 px-4 bg-indigo-50 border border-indigo-200 text-indigo-700 rounded-xl text-xs font-bold hover:bg-indigo-100 transition-colors flex items-center justify-center gap-2 disabled:opacity-50 disabled:pointer-events-none"
-                  >
-                    <span>{syncingBankSoal ? '🔄 Mensinkronkan Soal...' : '📥 Sync Soal dari Spreadsheet ke Firebase'}</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={handleSyncFirestoreToSheet}
-                    disabled={syncingFirestoreToSheet || !scriptUrlInput}
-                    className="w-full py-2.5 px-4 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl text-xs font-bold hover:bg-emerald-100 transition-colors flex items-center justify-center gap-2 disabled:opacity-50 disabled:pointer-events-none"
-                  >
-                    <span>{syncingFirestoreToSheet ? '🔄 Mengekspor Data...' : '📤 Ekspor Data Siswa & Nilai Firestore ke Spreadsheet'}</span>
-                  </button>
-                  <p className="text-[11px] text-slate-400 mt-1">
-                    Gunakan tombol di atas untuk menyinkronkan seluruh akun siswa (seperti <em>Zaky Faezya</em>) dan nilai ulangan harian yang ada di Firestore langsung ke lembar Spreadsheet.
-                  </p>
-                </div>
-              </div>
-
-              {sheetMsg && (
-                <p className="text-xs font-medium p-3 bg-emerald-50 text-emerald-800 rounded-lg border border-emerald-200">
-                  {sheetMsg}
-                </p>
-              )}
-            </form>
-
-            {/* Fixed Modal Footer - Always Visible & Clickable */}
-            <div className="p-4 sm:p-5 border-t border-slate-100 bg-slate-50 flex gap-3 flex-shrink-0">
+            {/* Tab Navigation */}
+            <div className="flex border-b border-slate-200 bg-slate-100/70 px-4 pt-2 gap-2 flex-shrink-0">
               <button
                 type="button"
-                onClick={() => setShowSheetModal(false)}
-                className="flex-1 py-3 border border-slate-300 text-slate-700 rounded-xl text-sm font-bold hover:bg-white transition-colors"
+                onClick={() => setGuruTab('sheets')}
+                className={`py-2 px-4 text-xs font-bold rounded-t-xl transition-all border-b-2 flex items-center gap-2 ${
+                  guruTab === 'sheets'
+                    ? 'bg-white text-emerald-700 border-emerald-600 shadow-sm'
+                    : 'text-slate-600 border-transparent hover:text-slate-900'
+                }`}
               >
-                Batal
+                <FileSpreadsheet className="w-3.5 h-3.5" />
+                <span>Pengaturan Sheets & PIN</span>
               </button>
               <button
-                type="submit"
-                form="guru-sheet-form"
-                className="flex-1 py-3 bg-emerald-600 text-white rounded-xl text-sm font-bold hover:bg-emerald-700 shadow-md shadow-emerald-200 active:scale-[0.98] transition-all flex items-center justify-center gap-2"
+                type="button"
+                onClick={() => {
+                  setGuruTab('attempts');
+                  fetchAllAttempts();
+                }}
+                className={`py-2 px-4 text-xs font-bold rounded-t-xl transition-all border-b-2 flex items-center gap-2 ${
+                  guruTab === 'attempts'
+                    ? 'bg-white text-indigo-700 border-indigo-600 shadow-sm'
+                    : 'text-slate-600 border-transparent hover:text-slate-900'
+                }`}
               >
-                <span>💾 Simpan Pengaturan</span>
+                <UserCheck className="w-3.5 h-3.5" />
+                <span>Kelola & Reset Percobaan Siswa (Max 2x)</span>
+                {studentAttempts.length > 0 && (
+                  <span className="ml-1 px-1.5 py-0.5 rounded-full text-[10px] bg-indigo-100 text-indigo-700 font-bold">
+                    {studentAttempts.length}
+                  </span>
+                )}
               </button>
             </div>
+
+            {/* TAB 1: PENGATURAN SHEETS & PIN */}
+            {guruTab === 'sheets' && (
+              <>
+                {/* Scrollable Form Body */}
+                <form onSubmit={handleSaveSheetConfig} id="guru-sheet-form" className="overflow-y-auto p-5 sm:p-6 flex-1 space-y-4">
+                  <p className="text-xs text-slate-600 leading-relaxed bg-emerald-50/60 border border-emerald-100 p-3 rounded-xl">
+                    Aplikasi menyimpan data pendaftaran akun siswa, hasil ujian, dan log percobaan ke <strong>Firebase Firestore</strong> dan <strong>Google Spreadsheet</strong>.
+                  </p>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                      Google Spreadsheet ID
+                    </label>
+                    <input 
+                      type="text"
+                      value={sheetIdInput}
+                      onChange={(e) => setSheetIdInput(e.target.value)}
+                      placeholder="Contoh: 1xABC123xyz_ID_dari_URL_spreadsheet"
+                      className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-mono focus:ring-2 focus:ring-emerald-500 outline-none text-slate-800"
+                    />
+                    <p className="text-[11px] text-slate-400 mt-1">
+                      Ambil ID dari URL: <code>https://docs.google.com/spreadsheets/d/<b>[SPREADSHEET_ID]</b>/edit</code>
+                    </p>
+                  </div>
+
+                  <div>
+                    <button
+                      type="button"
+                      onClick={handleAutoCreateSheet}
+                      disabled={creatingSheet}
+                      className="w-full py-2.5 px-4 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl text-xs font-bold hover:bg-emerald-100 transition-colors flex items-center justify-center gap-2"
+                    >
+                      <Plus className="w-4 h-4" />
+                      <span>{creatingSheet ? 'Membuat Spreadsheet...' : 'Buat Spreadsheet "MathFun" Otomatis'}</span>
+                    </button>
+                  </div>
+
+                  <div className="border-t border-slate-100 pt-4">
+                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                      Kode Akses / PIN Mode Guru (Pengaturan Keamanan)
+                    </label>
+                    <input 
+                      type="text"
+                      value={guruPinSettingInput}
+                      onChange={(e) => setGuruPinSettingInput(e.target.value)}
+                      placeholder="Contoh: guru123"
+                      className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-mono focus:ring-2 focus:ring-emerald-500 outline-none text-slate-800 font-bold"
+                    />
+                    <p className="text-[11px] text-slate-400 mt-1">
+                      PIN ini digunakan untuk membuka menu Akses Guru agar siswa tidak dapat mengubah Spreadsheet ID.
+                    </p>
+                  </div>
+
+                  <div className="border-t border-slate-100 pt-4">
+                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                      PIN Akses Ujian / Ulangan Harian Siswa (Global)
+                    </label>
+                    <input 
+                      type="text"
+                      value={ulanganPinSettingInput}
+                      onChange={(e) => setUlanganPinSettingInput(e.target.value)}
+                      placeholder="Atur PIN khusus atau atur per bab di Spreadsheet"
+                      className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-mono focus:ring-2 focus:ring-indigo-500 outline-none text-indigo-900 font-bold"
+                    />
+                    <p className="text-[11px] text-slate-400 mt-1">
+                      PIN global ini opsional jika Anda sudah mengatur PIN khusus per bab pada sheet <code>Pengaturan PIN Soal</code> di Google Spreadsheet.
+                    </p>
+                  </div>
+
+                  <div className="border-t border-slate-100 pt-4">
+                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                      Google Apps Script Web App URL (Webhook)
+                    </label>
+                    <input 
+                      type="text"
+                      value={scriptUrlInput}
+                      onChange={(e) => setScriptUrlInput(e.target.value)}
+                      placeholder="https://script.google.com/macros/s/.../exec"
+                      className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono focus:ring-2 focus:ring-emerald-500 outline-none text-slate-800"
+                    />
+                    
+                    <div className="mt-3 space-y-2.5">
+                      <button
+                        type="button"
+                        onClick={() => setShowCodeModal(true)}
+                        className="w-full py-2.5 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-colors flex items-center justify-center gap-2 border border-slate-300"
+                      >
+                        <Code className="w-4 h-4 text-indigo-600" />
+                        <span>📋 Salin Kode Apps Script (Kode.gs) Terbaru (Termasuk Tab Percobaan)</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={handleSyncBankSoal}
+                        disabled={syncingBankSoal || !scriptUrlInput}
+                        className="w-full py-2.5 px-4 bg-indigo-50 border border-indigo-200 text-indigo-700 rounded-xl text-xs font-bold hover:bg-indigo-100 transition-colors flex items-center justify-center gap-2 disabled:opacity-50 disabled:pointer-events-none"
+                      >
+                        <span>{syncingBankSoal ? '🔄 Mensinkronkan Soal...' : '📥 Sync Soal dari Spreadsheet ke Firebase'}</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={handleSyncFirestoreToSheet}
+                        disabled={syncingFirestoreToSheet || !scriptUrlInput}
+                        className="w-full py-2.5 px-4 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl text-xs font-bold hover:bg-emerald-100 transition-colors flex items-center justify-center gap-2 disabled:opacity-50 disabled:pointer-events-none"
+                      >
+                        <span>{syncingFirestoreToSheet ? '🔄 Mengekspor Data...' : '📤 Ekspor Data Siswa & Nilai Firestore ke Spreadsheet'}</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {sheetMsg && (
+                    <p className="text-xs font-medium p-3 bg-emerald-50 text-emerald-800 rounded-lg border border-emerald-200">
+                      {sheetMsg}
+                    </p>
+                  )}
+                </form>
+
+                {/* Footer for Sheets Tab */}
+                <div className="p-4 sm:p-5 border-t border-slate-100 bg-slate-50 flex gap-3 flex-shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setShowSheetModal(false)}
+                    className="flex-1 py-3 border border-slate-300 text-slate-700 rounded-xl text-sm font-bold hover:bg-white transition-colors"
+                  >
+                    Batal
+                  </button>
+                  <button
+                    type="submit"
+                    form="guru-sheet-form"
+                    className="flex-1 py-3 bg-emerald-600 text-white rounded-xl text-sm font-bold hover:bg-emerald-700 shadow-md shadow-emerald-200 active:scale-[0.98] transition-all flex items-center justify-center gap-2"
+                  >
+                    <span>💾 Simpan Pengaturan</span>
+                  </button>
+                </div>
+              </>
+            )}
+
+            {/* TAB 2: KELOLA & RESET PERCOBAAN SISWA (MAX 2x) */}
+            {guruTab === 'attempts' && (
+              <div className="overflow-y-auto p-5 sm:p-6 flex-1 space-y-5">
+                {/* Notice & Status banner */}
+                <div className="p-3.5 bg-indigo-50/70 border border-indigo-100 rounded-2xl flex items-start gap-3">
+                  <UserCheck className="w-5 h-5 text-indigo-600 flex-shrink-0 mt-0.5" />
+                  <div className="text-xs text-indigo-950 space-y-1">
+                    <p className="font-bold">Ketentuan Batasan Ulangan Harian: Maksimal 2 Kali / Materi</p>
+                    <p className="text-slate-600">
+                      Setiap akun siswa dibatasi mengerjakan ulangan maksimal <strong>2 kali</strong> untuk tiap materi. Di menu ini Guru dapat melihat riwayat pengerjaan siswa dan <strong>mereset kesempatan siswa ke 0</strong> jika diperlukan remidi atau terjadi kendala jaringan.
+                    </p>
+                  </div>
+                </div>
+
+                {attemptActionMsg && (
+                  <div className="p-3 bg-amber-50 border border-amber-200 text-amber-900 rounded-xl text-xs font-semibold flex items-center gap-2">
+                    <RefreshCw className="w-4 h-4 animate-spin text-amber-600" />
+                    <span>{attemptActionMsg}</span>
+                  </div>
+                )}
+
+                {/* Quick Reset Form */}
+                <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-3">
+                  <div className="flex items-center gap-2 text-slate-800">
+                    <RefreshCw className="w-4 h-4 text-indigo-600" />
+                    <h3 className="text-xs font-bold uppercase tracking-wider">Reset Cepat Berdasarkan Email Siswa</h3>
+                  </div>
+                  <form onSubmit={handleQuickResetSubmit} className="grid grid-cols-1 sm:grid-cols-12 gap-2.5">
+                    <div className="sm:col-span-5">
+                      <input
+                        type="email"
+                        value={quickResetEmail}
+                        onChange={(e) => setQuickResetEmail(e.target.value)}
+                        placeholder="Email akun siswa (misal: zaky@...)"
+                        className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs focus:ring-2 focus:ring-indigo-500 outline-none text-slate-800"
+                      />
+                    </div>
+                    <div className="sm:col-span-4">
+                      <select
+                        value={quickResetTopic}
+                        onChange={(e) => setQuickResetTopic(e.target.value)}
+                        className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs focus:ring-2 focus:ring-indigo-500 outline-none text-slate-800"
+                      >
+                        {topics.map(t => (
+                          <option key={t.id} value={t.id}>{t.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="sm:col-span-3">
+                      <button
+                        type="submit"
+                        className="w-full py-2 px-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all shadow-sm"
+                      >
+                        Reset ke 0 (Beri 2x)
+                      </button>
+                    </div>
+                  </form>
+                </div>
+
+                {/* Filters */}
+                <div className="flex flex-col sm:flex-row gap-2.5 items-center justify-between">
+                  <div className="relative w-full sm:w-1/2">
+                    <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                    <input
+                      type="text"
+                      value={attemptFilterSearch}
+                      onChange={(e) => setAttemptFilterSearch(e.target.value)}
+                      placeholder="Cari nama atau email siswa..."
+                      className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </div>
+
+                  <div className="flex gap-2 w-full sm:w-auto">
+                    <select
+                      value={attemptFilterTopic}
+                      onChange={(e) => setAttemptFilterTopic(e.target.value)}
+                      className="flex-1 sm:flex-none px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-700 outline-none"
+                    >
+                      <option value="">Semua Bab / Materi</option>
+                      {topics.map(t => (
+                        <option key={t.id} value={t.id}>{t.name}</option>
+                      ))}
+                    </select>
+
+                    <button
+                      type="button"
+                      onClick={fetchAllAttempts}
+                      disabled={loadingAttempts}
+                      className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${loadingAttempts ? 'animate-spin' : ''}`} />
+                      <span>Segarkan</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* List of attempts */}
+                <div className="space-y-2">
+                  <div className="flex justify-between items-center text-xs text-slate-500 font-bold px-1">
+                    <span>Daftar Siswa & Percobaan per Bab</span>
+                    <span>Total Data: {studentAttempts.length}</span>
+                  </div>
+
+                  {loadingAttempts ? (
+                    <div className="p-8 text-center text-xs text-slate-400 bg-slate-50 rounded-2xl border border-dashed border-slate-200">
+                      <RefreshCw className="w-5 h-5 animate-spin mx-auto mb-2 text-indigo-500" />
+                      Memuat data percobaan siswa...
+                    </div>
+                  ) : studentAttempts.length === 0 ? (
+                    <div className="p-8 text-center text-xs text-slate-500 bg-slate-50 rounded-2xl border border-dashed border-slate-200">
+                      Belum ada siswa yang mengerjakan ulangan harian.
+                    </div>
+                  ) : (
+                    <div className="divide-y divide-slate-100 border border-slate-200 rounded-2xl overflow-hidden bg-white shadow-sm max-h-72 overflow-y-auto">
+                      {studentAttempts
+                        .filter(att => {
+                          const matchesSearch = !attemptFilterSearch || 
+                            (att.userName || '').toLowerCase().includes(attemptFilterSearch.toLowerCase()) ||
+                            (att.email || '').toLowerCase().includes(attemptFilterSearch.toLowerCase());
+                          const matchesTopic = !attemptFilterTopic || att.topicId === attemptFilterTopic;
+                          return matchesSearch && matchesTopic;
+                        })
+                        .map(att => {
+                          const topicInfo = topics.find(t => t.id === att.topicId);
+                          const isFull = att.count >= 2;
+                          return (
+                            <div key={att.id} className="p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-slate-50/70 transition-colors">
+                              <div className="space-y-0.5">
+                                <div className="flex items-center gap-2">
+                                  <span className="font-bold text-xs text-slate-900">{att.userName || 'Siswa Tanpa Nama'}</span>
+                                  <span className="text-[11px] text-slate-400 font-mono">({att.email || '-'})</span>
+                                </div>
+                                <div className="flex items-center gap-2 text-[11px] text-slate-500">
+                                  <span className="font-semibold text-indigo-600">{topicInfo ? topicInfo.name : att.topicId}</span>
+                                  <span>•</span>
+                                  <span>Terakhir: {att.lastAttempt ? new Date(att.lastAttempt).toLocaleString('id-ID') : '-'}</span>
+                                </div>
+                              </div>
+
+                              <div className="flex items-center gap-2.5 self-end sm:self-center">
+                                <span className={`px-2.5 py-1 rounded-full text-[11px] font-bold border ${
+                                  isFull 
+                                    ? 'bg-rose-50 text-rose-700 border-rose-200' 
+                                    : att.count === 1 
+                                      ? 'bg-amber-50 text-amber-700 border-amber-200'
+                                      : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                }`}>
+                                  {att.count} / 2 Percobaan
+                                </span>
+
+                                <button
+                                  type="button"
+                                  onClick={() => handleResetAttemptForStudent(att.email, att.userId, att.topicId, att.userName)}
+                                  className="px-2.5 py-1 bg-slate-100 hover:bg-rose-100 hover:text-rose-700 text-slate-700 border border-slate-200 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1"
+                                  title="Reset percobaan siswa ini kembali ke 0"
+                                >
+                                  <RefreshCw className="w-3 h-3" />
+                                  <span>Reset ke 0</span>
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                    </div>
+                  )}
+                </div>
+
+                {/* Footer in Attempts tab */}
+                <div className="pt-2 flex justify-end">
+                  <button
+                    type="button"
+                    onClick={() => setShowSheetModal(false)}
+                    className="py-2.5 px-5 bg-slate-200 hover:bg-slate-300 text-slate-800 rounded-xl text-xs font-bold transition-colors"
+                  >
+                    Tutup Panel Guru
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

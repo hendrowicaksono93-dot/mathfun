@@ -5,8 +5,16 @@ import { KeyRound, Lock, ShieldAlert, ShieldCheck, ArrowLeft, CheckCircle2, Aler
 import { db, collection, addDoc } from '../lib/firebase';
 import { useAuth, formatStudentNameWithClass } from '../lib/AuthContext';
 import QuestionImage from '../components/QuestionImage';
-import { appendScoreToSheet, getUlanganPin, getGuruPin, getScriptUrl, setScriptUrl, getTopicPinsFromStorage, setTopicPinInStorage } from '../lib/sheets';
-import { getUserAttemptData, recordUserAttempt, resetUserAttempts, UserAttemptData } from '../lib/attemptService';
+import { 
+  getUserAttemptData, 
+  recordUserAttempt, 
+  resetUserAttempts, 
+  getAllStudentAttempts,
+  adjustStudentAttempt,
+  UserAttemptData,
+  StudentAttemptSummary,
+  MAX_ALLOWED_ATTEMPTS
+} from '../lib/attemptService';
 import { 
   getBankSoalFromFirestore, 
   saveBankSoalToFirestore, 
@@ -43,6 +51,15 @@ import {
   peluangQuestions
 } from '../lib/data';
 import { topics } from '../lib/topics';
+import { 
+  getScriptUrl, 
+  setScriptUrl, 
+  getGuruPin, 
+  getUlanganPin, 
+  getTopicPinsFromStorage, 
+  setTopicPinInStorage, 
+  appendScoreToSheet 
+} from '../lib/sheets';
 
 export default function Ulangan() {
   const { topicId } = useParams();
@@ -93,6 +110,14 @@ export default function Ulangan() {
   const [attemptData, setAttemptData] = useState<UserAttemptData>({ count: 0, history: [], isMaxReached: false });
   const [loadingAttempts, setLoadingAttempts] = useState<boolean>(true);
   const [isResettingAttempt, setIsResettingAttempt] = useState<boolean>(false);
+  const isSubmittingRef = useRef<boolean>(false);
+
+  // Guru Attempt Management for this Topic
+  const [showGuruAttemptsModal, setShowGuruAttemptsModal] = useState<boolean>(false);
+  const [topicAttemptsList, setTopicAttemptsList] = useState<StudentAttemptSummary[]>([]);
+  const [loadingTopicAttempts, setLoadingTopicAttempts] = useState<boolean>(false);
+  const [guruActionMsg, setGuruActionMsg] = useState<string>('');
+  const [manualResetEmail, setManualResetEmail] = useState<string>('');
 
   // Load user attempts for current account and topic
   useEffect(() => {
@@ -549,6 +574,11 @@ export default function Ulangan() {
   };
 
   const handleSubmit = () => {
+    if (isSubmittingRef.current || isSaving || submitted) {
+      console.warn('Pengumpulan jawaban sedang berlangsung...');
+      return;
+    }
+
     // Determine missing answers
     const missing = quizQuestions.filter(q => {
       const a = answers[q.id];
@@ -567,7 +597,14 @@ export default function Ulangan() {
   };
 
   const executeSubmit = () => {
+    if (isSubmittingRef.current || isSaving || submitted) {
+      console.warn('Pengumpulan jawaban sedang diproses...');
+      return;
+    }
+    // Lock immediately synchronously before async operations
+    isSubmittingRef.current = true;
     setShowUnansweredModal(false);
+
     let pgCorrect = 0;
     let isianCorrect = 0;
 
@@ -629,7 +666,7 @@ export default function Ulangan() {
           fullName: name,
           className: user?.className || '',
           email: email,
-          topicId: topicId,
+          topicId: currentTopic.id,
           topicName: currentTopic.name,
           score: total,
           correctPilihan: pg,
@@ -641,9 +678,9 @@ export default function Ulangan() {
         console.warn('Simpan Firestore offline/tertunda:', fsErr);
       }
 
-      // 2. Simpan & perbarui batasan kuota percobaan (Maksimal 2x per akun)
+      // 2. Simpan & perbarui batasan kuota percobaan (Maksimal 2x per akun per materi)
       try {
-        const attemptResult = await recordUserAttempt(user?.uid || email, currentTopic.id, {
+        const attemptResult = await recordUserAttempt(user?.uid || '', currentTopic.id, {
           score: total,
           pg,
           isian,
@@ -686,7 +723,7 @@ export default function Ulangan() {
       });
 
       if (sheetRes.success) {
-        setSaveStatus('✅ Nilai berhasil disimpan di Firebase & Google Sheet!');
+        setSaveStatus('✅ Nilai & Percobaan berhasil dicatat di Firebase & Google Sheet!');
       } else {
         setSaveStatus(`✅ Nilai tersimpan di Firebase. (${sheetRes.message})`);
       }
@@ -702,7 +739,7 @@ export default function Ulangan() {
     if (!user) return;
     setIsResettingAttempt(true);
     try {
-      await resetUserAttempts(user.uid, currentTopic.id, user.email);
+      await resetUserAttempts(user.uid, currentTopic.id, user.email, user.fullName, user.fullName || 'Guru');
       setAttemptData({ count: 0, history: [], isMaxReached: false, bestScore: undefined });
       setSaveStatus('✅ Kuota percobaan berhasil di-reset.');
     } catch (e) {
@@ -712,10 +749,66 @@ export default function Ulangan() {
     }
   };
 
+  const fetchTopicAttempts = async () => {
+    setLoadingTopicAttempts(true);
+    setGuruActionMsg('');
+    try {
+      const all = await getAllStudentAttempts();
+      const filtered = all.filter(a => a.topicId === currentTopic.id);
+      setTopicAttemptsList(filtered);
+    } catch (e) {
+      console.error('Gagal memuat list attempts:', e);
+    } finally {
+      setLoadingTopicAttempts(false);
+    }
+  };
+
+  const handleResetStudentFromModal = async (studentEmail: string, studentUid?: string, studentName?: string) => {
+    setGuruActionMsg('Sedang mereset kuota...');
+    try {
+      await resetUserAttempts(
+        studentUid || studentEmail,
+        currentTopic.id,
+        studentEmail,
+        studentName,
+        user?.fullName || 'Guru / Admin'
+      );
+      setGuruActionMsg(`✅ Kuota percobaan ${studentName || studentEmail} berhasil di-reset ke 0 (Bebas tes 2x lagi).`);
+      fetchTopicAttempts();
+
+      if (user && (user.email === studentEmail || user.uid === studentUid)) {
+        setAttemptData({ count: 0, history: [], isMaxReached: false, bestScore: undefined });
+      }
+    } catch (e: any) {
+      setGuruActionMsg(`⚠️ Gagal reset: ${e.message}`);
+    }
+  };
+
+  const handleManualResetByEmail = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!manualResetEmail.trim()) return;
+    setGuruActionMsg('Sedang memproses reset...');
+    try {
+      await resetUserAttempts(
+        manualResetEmail.trim(),
+        currentTopic.id,
+        manualResetEmail.trim(),
+        undefined,
+        user?.fullName || 'Guru / Admin'
+      );
+      setGuruActionMsg(`✅ Kuota untuk email ${manualResetEmail.trim()} pada materi ini berhasil direset.`);
+      setManualResetEmail('');
+      fetchTopicAttempts();
+    } catch (err: any) {
+      setGuruActionMsg(`⚠️ Gagal reset: ${err.message}`);
+    }
+  };
+
   const resetQuiz = () => {
     if (attemptData.isMaxReached && !isGuru) {
       return;
     }
+    isSubmittingRef.current = false;
     setAnswers({});
     setSubmitted(false);
     setSaveStatus('');
@@ -908,15 +1001,28 @@ export default function Ulangan() {
             </span>
           </div>
           {isGuru && (
-            <div className="pt-2 border-t border-slate-200/80 flex items-center justify-between text-[11px]">
-              <span className="text-purple-700 font-bold">Mode Guru Aktif:</span>
+            <div className="pt-2 border-t border-slate-200/80 flex flex-col gap-1.5 text-[11px]">
+              <div className="flex items-center justify-between">
+                <span className="text-purple-700 font-bold">Mode Guru Aktif:</span>
+                <button
+                  type="button"
+                  onClick={handleResetAttempts}
+                  disabled={isResettingAttempt}
+                  className="text-purple-600 hover:text-purple-800 underline font-semibold cursor-pointer"
+                >
+                  {isResettingAttempt ? 'Mereset...' : 'Reset Kuota Akun Ini'}
+                </button>
+              </div>
               <button
                 type="button"
-                onClick={handleResetAttempts}
-                disabled={isResettingAttempt}
-                className="text-purple-600 hover:text-purple-800 underline font-semibold cursor-pointer"
+                onClick={() => {
+                  setShowGuruAttemptsModal(true);
+                  fetchTopicAttempts();
+                }}
+                className="w-full py-1.5 px-3 bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 rounded-lg font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
               >
-                {isResettingAttempt ? 'Mereset...' : 'Reset Kuota Akun'}
+                <UserCheck className="w-3.5 h-3.5" />
+                <span>👥 Kelola & Reset Percobaan Seluruh Siswa</span>
               </button>
             </div>
           )}
@@ -1452,16 +1558,17 @@ export default function Ulangan() {
           <div className="sticky bottom-6 flex justify-end">
              <button 
                onClick={handleSubmit} 
-               className="bg-indigo-600 text-white text-sm font-bold px-8 py-3.5 rounded-xl shadow-lg shadow-indigo-200 hover:bg-indigo-700 transition-all w-full md:w-auto text-center cursor-pointer flex items-center justify-center gap-2"
+               disabled={isSaving || submitted}
+               className="bg-indigo-600 text-white text-sm font-bold px-8 py-3.5 rounded-xl shadow-lg shadow-indigo-200 hover:bg-indigo-700 transition-all w-full md:w-auto text-center cursor-pointer flex items-center justify-center gap-2 disabled:opacity-50 disabled:pointer-events-none"
              >
                <CheckCircle2 className="w-4 h-4" />
-               <span>Kumpulkan Jawaban</span>
+               <span>{isSaving ? 'Menyimpan Jawaban...' : 'Kumpulkan Jawaban'}</span>
              </button>
           </div>
         </>
       )}
 
-      {/* Modal Peringatan Soal Belum Terisi (In-App React Modal, No window.confirm) */}
+      {/* Modal Peringatan Soal Belum Terisi */}
       {showUnansweredModal && (
         <div className="fixed inset-0 z-50 bg-slate-950/75 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl max-w-md w-full p-6 md:p-8 shadow-2xl border border-slate-200 text-center animate-in zoom-in-95 duration-200">
@@ -1485,9 +1592,119 @@ export default function Ulangan() {
               <button
                 type="button"
                 onClick={executeSubmit}
-                className="w-full sm:flex-1 py-3 px-4 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl transition-colors shadow-sm shadow-indigo-200 cursor-pointer"
+                disabled={isSaving || submitted}
+                className="w-full sm:flex-1 py-3 px-4 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl transition-colors shadow-sm shadow-indigo-200 cursor-pointer disabled:opacity-50 disabled:pointer-events-none"
               >
-                Tetap Kumpulkan
+                {isSaving ? 'Menyimpan...' : 'Tetap Kumpulkan'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Kelola & Reset Percobaan Siswa untuk Bab Ini (Akses Guru) */}
+      {showGuruAttemptsModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/75 backdrop-blur-xs flex items-center justify-center p-3 md:p-4">
+          <div className="bg-white rounded-3xl max-w-2xl w-full p-6 md:p-8 shadow-2xl border border-slate-200 flex flex-col max-h-[90vh] animate-in zoom-in-95 duration-200">
+            <div className="flex justify-between items-start pb-4 border-b border-slate-100">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-purple-100 text-purple-700 flex items-center justify-center font-bold">
+                  <UserCheck className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-slate-800">
+                    Kelola Percobaan Siswa: {currentTopic.name}
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Lihat status kuota & reset percobaan siswa agar dapat mengikuti ulangan kembali (Maks. 2x).
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowGuruAttemptsModal(false)}
+                className="w-8 h-8 rounded-full bg-slate-100 text-slate-500 hover:text-slate-800 flex items-center justify-center font-bold text-sm cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            {guruActionMsg && (
+              <div className="my-3 p-3 bg-indigo-50 border border-indigo-200 text-indigo-900 rounded-xl text-xs font-medium">
+                {guruActionMsg}
+              </div>
+            )}
+
+            {/* Form Reset Cepat Berdasarkan Email */}
+            <form onSubmit={handleManualResetByEmail} className="my-4 p-4 bg-slate-50 border border-slate-200 rounded-2xl flex flex-col sm:flex-row gap-2">
+              <input
+                type="email"
+                required
+                value={manualResetEmail}
+                onChange={(e) => setManualResetEmail(e.target.value)}
+                placeholder="Masukkan email siswa (misal: siswa@example.com)"
+                className="flex-1 px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-purple-500 outline-none text-slate-800"
+              />
+              <button
+                type="submit"
+                className="py-2 px-4 bg-purple-600 hover:bg-purple-700 text-white rounded-xl text-xs font-bold transition-all shadow-sm whitespace-nowrap cursor-pointer"
+              >
+                🔄 Reset Siswa Ini
+              </button>
+            </form>
+
+            {/* List Siswa di Bab Ini */}
+            <div className="flex-1 overflow-y-auto space-y-2.5 pr-1">
+              {loadingTopicAttempts ? (
+                <div className="py-12 text-center text-xs text-slate-400">
+                  Memuat data percobaan siswa dari Firestore...
+                </div>
+              ) : topicAttemptsList.length === 0 ? (
+                <div className="py-12 text-center text-xs text-slate-400 bg-slate-50 rounded-2xl border border-slate-200">
+                  Belum ada siswa yang mengerjakan ulangan materi {currentTopic.name}.
+                </div>
+              ) : (
+                topicAttemptsList.map((item, idx) => (
+                  <div key={item.docId || idx} className="p-3.5 bg-slate-50 hover:bg-slate-100/80 border border-slate-200 rounded-2xl flex items-center justify-between gap-3 text-xs transition-colors">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-slate-800 truncate">{item.fullName || 'Siswa'}</span>
+                        <span className={`px-2 py-0.5 rounded-md font-bold text-[10px] ${
+                          item.count >= 2 
+                            ? 'bg-rose-100 text-rose-700' 
+                            : 'bg-emerald-100 text-emerald-700'
+                        }`}>
+                          {item.count} / 2 Kali
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-500 truncate">{item.email}</p>
+                      <p className="text-[10px] text-slate-400 mt-0.5">
+                        Nilai Terbaik: <strong className="text-indigo-600 font-bold">{item.bestScore ?? '-'}</strong> • Terakhir: {item.updatedAt ? new Date(item.updatedAt).toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'short' }) : '-'}
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-1.5 flex-shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => handleResetStudentFromModal(item.email, item.userId, item.fullName)}
+                        className="py-1.5 px-3 bg-purple-600 hover:bg-purple-700 text-white rounded-xl text-[11px] font-bold transition-all shadow-sm cursor-pointer flex items-center gap-1"
+                      >
+                        <RefreshCw className="w-3 h-3" />
+                        <span>Reset ke 0 (Beri 2x)</span>
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div className="pt-4 border-t border-slate-100 flex justify-between items-center text-xs text-slate-500">
+              <span>Total {topicAttemptsList.length} data pengerjaan di bab ini</span>
+              <button
+                type="button"
+                onClick={fetchTopicAttempts}
+                className="text-purple-600 hover:underline font-bold flex items-center gap-1 cursor-pointer"
+              >
+                <RefreshCw className="w-3.5 h-3.5" /> Segarkan Data
               </button>
             </div>
           </div>
